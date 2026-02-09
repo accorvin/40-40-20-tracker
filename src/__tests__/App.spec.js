@@ -5,6 +5,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { ref } from 'vue'
 import App from '../App.vue'
+import BoardSettings from '../components/BoardSettings.vue'
 import DashboardGrid from '../components/DashboardGrid.vue'
 
 // Mock useAuth composable
@@ -197,5 +198,77 @@ describe('App', () => {
     const grid = wrapper.findComponent(DashboardGrid)
     expect(grid.exists()).toBe(true)
     expect(grid.props('boards')).toHaveLength(0)
+  })
+
+  it('renders a settings gear icon button', async () => {
+    const wrapper = mount(App)
+    await flushPromises()
+
+    const settingsButton = wrapper.findAll('button').find(b => b.attributes('title') === 'Board Settings')
+    expect(settingsButton.exists()).toBe(true)
+  })
+
+  it('navigates to board settings when gear icon is clicked', async () => {
+    const wrapper = mount(App)
+    await flushPromises()
+
+    // Add mock for /teams GET since BoardSettings will call it
+    fetch.mockImplementation((url, options) => {
+      if (url.endsWith('/boards')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => mockBoardsResponse
+        })
+      }
+      if (url.endsWith('/teams') && (!options || options.method === 'GET' || !options.method)) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ teams: [] })
+        })
+      }
+      return Promise.reject(new Error(`Unknown URL: ${url}`))
+    })
+
+    const settingsButton = wrapper.findAll('button').find(b => b.attributes('title') === 'Board Settings')
+    await settingsButton.trigger('click')
+    await flushPromises()
+
+    const boardSettings = wrapper.findComponent(BoardSettings)
+    expect(boardSettings.exists()).toBe(true)
+  })
+
+  it('navigates back to dashboard from board settings', async () => {
+    const wrapper = mount(App)
+    await flushPromises()
+
+    fetch.mockImplementation((url, options) => {
+      if (url.endsWith('/boards')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => mockBoardsResponse
+        })
+      }
+      if (url.endsWith('/teams') && (!options || options.method === 'GET' || !options.method)) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ teams: [] })
+        })
+      }
+      return Promise.reject(new Error(`Unknown URL: ${url}`))
+    })
+
+    // Navigate to settings
+    const settingsButton = wrapper.findAll('button').find(b => b.attributes('title') === 'Board Settings')
+    await settingsButton.trigger('click')
+    await flushPromises()
+
+    // Click back
+    const boardSettings = wrapper.findComponent(BoardSettings)
+    boardSettings.vm.$emit('back')
+    await wrapper.vm.$nextTick()
+
+    // Should show dashboard again
+    const grid = wrapper.findComponent(DashboardGrid)
+    expect(grid.exists()).toBe(true)
   })
 })
