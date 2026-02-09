@@ -1,0 +1,4 @@
+{
+  "s3Bucket": "40-40-20-tracker-data-dev",
+  "firebaseProjectId": "ai-engineering-jira-tracking"
+}

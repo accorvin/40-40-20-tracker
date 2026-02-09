@@ -1,0 +1,6 @@
+{
+  "jiraHost": "https://issues.redhat.com",
+  "s3Bucket": "40-40-20-tracker-data-dev",
+  "firebaseProjectId": "ai-engineering-jira-tracking",
+  "jiraTokenParameterName": "/40-40-20-tracker/dev/jira-token"
+}

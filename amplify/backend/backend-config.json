@@ -1,0 +1,46 @@
+{
+  "api": {
+    "allocationApi": {
+      "dependsOn": [
+        {
+          "attributes": ["Name", "Arn"],
+          "category": "function",
+          "resourceName": "jiraFetcher"
+        },
+        {
+          "attributes": ["Name", "Arn"],
+          "category": "function",
+          "resourceName": "dataReader"
+        }
+      ],
+      "providerPlugin": "awscloudformation",
+      "service": "API Gateway"
+    }
+  },
+  "function": {
+    "jiraFetcher": {
+      "build": true,
+      "providerPlugin": "awscloudformation",
+      "service": "Lambda"
+    },
+    "dataReader": {
+      "build": true,
+      "providerPlugin": "awscloudformation",
+      "service": "Lambda"
+    }
+  },
+  "parameters": {
+    "AMPLIFY_function_jiraFetcher_deploymentBucketName": {
+      "usedBy": [{ "category": "function", "resourceName": "jiraFetcher" }]
+    },
+    "AMPLIFY_function_jiraFetcher_s3Key": {
+      "usedBy": [{ "category": "function", "resourceName": "jiraFetcher" }]
+    },
+    "AMPLIFY_function_dataReader_deploymentBucketName": {
+      "usedBy": [{ "category": "function", "resourceName": "dataReader" }]
+    },
+    "AMPLIFY_function_dataReader_s3Key": {
+      "usedBy": [{ "category": "function", "resourceName": "dataReader" }]
+    }
+  }
+}

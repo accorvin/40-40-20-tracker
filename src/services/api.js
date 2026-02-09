@@ -6,7 +6,7 @@
 
 import { useAuth } from '../composables/useAuth'
 
-const API_ENDPOINT = import.meta.env.VITE_API_ENDPOINT || 'https://placeholder.execute-api.us-east-1.amazonaws.com/dev'
+const API_ENDPOINT = import.meta.env.VITE_API_ENDPOINT || '/api'
 
 /**
  * Get Firebase ID token for authentication
@@ -209,6 +209,41 @@ export async function getTeams() {
     return await response.json()
   } catch (error) {
     console.error('Get teams error:', error)
+    throw error
+  }
+}
+
+/**
+ * Discover boards from Jira (saves boards.json + teams.json without processing sprints)
+ * @param {string} projectKey - Jira project key (e.g., 'RHOAIENG')
+ * @returns {Promise<{success: boolean, boardCount: number}>}
+ */
+export async function discoverBoards(projectKey) {
+  try {
+    const token = await getAuthToken()
+
+    const response = await fetch(`${API_ENDPOINT}/discover-boards`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ projectKey })
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json()
+
+      if (response.status === 401) {
+        throw new Error('Authentication failed. Please sign in again.')
+      }
+
+      throw new Error(errorData.error || `HTTP ${response.status}`)
+    }
+
+    return await response.json()
+  } catch (error) {
+    console.error('Discover boards error:', error)
     throw error
   }
 }

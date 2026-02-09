@@ -33,13 +33,13 @@ npm run dev
 
 ### AWS CLI Commands
 
-**IMPORTANT:** Always prepend AWS and Amplify CLI commands with `AWS_PROFILE=ais`
+**IMPORTANT:** Always prepend AWS and Amplify CLI commands with `rh-aws-saml-login iaps-rhods-odh-dev`
 
 Examples:
 ```bash
-AWS_PROFILE=ais aws ssm get-parameter --name /40-40-20-tracker/dev/jira-token
-AWS_PROFILE=ais amplify push
-AWS_PROFILE=ais amplify publish
+rh-aws-saml-login iaps-rhods-odh-dev aws ssm get-parameter --name /40-40-20-tracker/dev/jira-token
+rh-aws-saml-login iaps-rhods-odh-dev amplify push
+rh-aws-saml-login iaps-rhods-odh-dev amplify publish
 ```
 
 ## Project Structure

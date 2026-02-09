@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "paths": {
+    "/refresh": {
+      "name": "/refresh",
+      "lambdaFunction": "jiraFetcher",
+      "permissions": { "setting": "open" }
+    },
+    "/boards": {
+      "name": "/boards",
+      "lambdaFunction": "dataReader",
+      "permissions": { "setting": "open" }
+    },
+    "/sprints": {
+      "name": "/sprints",
+      "lambdaFunction": "dataReader",
+      "permissions": { "setting": "open" }
+    },
+    "/teams": {
+      "name": "/teams",
+      "lambdaFunction": "dataReader",
+      "permissions": { "setting": "open" }
+    }
+  }
+}
