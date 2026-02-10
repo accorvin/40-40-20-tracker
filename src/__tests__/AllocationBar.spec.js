@@ -85,4 +85,31 @@ describe('AllocationBar', () => {
     const markers = wrapper.findAll('[data-testid="target-marker"]')
     expect(markers.length).toBe(2) // 40% and 80% markers
   })
+
+  it('shows tooltip on hover with bucket name, points, and percentage', () => {
+    const wrapper = mount(AllocationBar, {
+      props: { buckets: mockBuckets, totalPoints: 90 }
+    })
+
+    const bugsSegment = wrapper.find('[data-testid="segment-bugs-tech-debt"]')
+    expect(bugsSegment.attributes('title')).toBe('Bugs & Tech Debt: 40 pts (44%)')
+
+    const featureSegment = wrapper.find('[data-testid="segment-feature-work"]')
+    expect(featureSegment.attributes('title')).toBe('Feature Work: 50 pts (56%)')
+  })
+
+  it('shows tooltip for learning segment when present', () => {
+    const withLearning = {
+      'bugs-tech-debt': { points: 40, count: 5 },
+      'feature-work': { points: 40, count: 5 },
+      'learning': { points: 20, count: 3 }
+    }
+
+    const wrapper = mount(AllocationBar, {
+      props: { buckets: withLearning, totalPoints: 100 }
+    })
+
+    const learningSegment = wrapper.find('[data-testid="segment-learning"]')
+    expect(learningSegment.attributes('title')).toBe('Learning: 20 pts (20%)')
+  })
 })

@@ -14,15 +14,32 @@
       <p>Click Refresh to fetch boards from Jira.</p>
     </div>
 
-    <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-      <TeamCard
-        v-for="board in boards"
-        :key="board.id"
-        :board="board"
-        :sprintData="boardSprintData[board.id] || null"
-        @select-team="$emit('select-team', $event)"
-      />
-    </div>
+    <template v-else>
+      <div data-testid="allocation-legend" class="flex items-center gap-4 mb-4 text-sm text-gray-600">
+        <span class="flex items-center gap-1.5">
+          <span class="inline-block w-3 h-3 rounded-sm bg-amber-400"></span>
+          Bugs & Tech Debt (40%)
+        </span>
+        <span class="flex items-center gap-1.5">
+          <span class="inline-block w-3 h-3 rounded-sm bg-blue-400"></span>
+          Feature Work (40%)
+        </span>
+        <span class="flex items-center gap-1.5">
+          <span class="inline-block w-3 h-3 rounded-sm bg-green-400"></span>
+          Learning (20%)
+        </span>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        <TeamCard
+          v-for="board in boards"
+          :key="board.id"
+          :board="board"
+          :sprintData="boardSprintData[board.id] || null"
+          @select-team="$emit('select-team', $event)"
+        />
+      </div>
+    </template>
   </div>
 </template>
 

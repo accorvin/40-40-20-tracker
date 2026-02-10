@@ -168,16 +168,13 @@ async function fetchSprintIssues(sprintId) {
 
   while (startAt < total) {
     const data = await jiraRequest(
-      `/rest/agile/1.0/sprint/${sprintId}/issue?startAt=${startAt}&maxResults=${maxResults}&fields=summary,issuetype,status,assignee,story_points,customfield_10004,resolution,resolutiondate`
+      `/rest/agile/1.0/sprint/${sprintId}/issue?startAt=${startAt}&maxResults=${maxResults}&fields=summary,issuetype,status,assignee,customfield_12310243,resolution,resolutiondate`
     );
 
     total = data.total;
 
     issues.push(...data.issues.map(issue => {
-      // Try multiple common story points field names
-      const storyPoints = issue.fields.story_points
-        || issue.fields.customfield_10004
-        || null;
+      const storyPoints = issue.fields.customfield_12310243 ?? null;
 
       return {
         key: issue.key,

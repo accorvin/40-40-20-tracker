@@ -7,24 +7,27 @@
       <div
         v-if="bugsPercent > 0"
         data-testid="segment-bugs-tech-debt"
-        class="bg-amber-400 h-full flex items-center justify-center text-xs font-medium text-amber-900"
+        class="bg-amber-400 h-full flex items-center justify-center text-xs font-medium text-amber-900 cursor-default"
         :style="{ width: bugsPercent + '%' }"
+        :title="`Bugs & Tech Debt: ${buckets['bugs-tech-debt']?.points || 0} pts (${bugsPercent}%)`"
       >
         <span v-if="bugsPercent >= 10">{{ bugsPercent }}%</span>
       </div>
       <div
         v-if="featurePercent > 0"
         data-testid="segment-feature-work"
-        class="bg-blue-400 h-full flex items-center justify-center text-xs font-medium text-blue-900"
+        class="bg-blue-400 h-full flex items-center justify-center text-xs font-medium text-blue-900 cursor-default"
         :style="{ width: featurePercent + '%' }"
+        :title="`Feature Work: ${buckets['feature-work']?.points || 0} pts (${featurePercent}%)`"
       >
         <span v-if="featurePercent >= 10">{{ featurePercent }}%</span>
       </div>
       <div
         v-if="learningPercent > 0"
         data-testid="segment-learning"
-        class="bg-green-400 h-full flex items-center justify-center text-xs font-medium text-green-900"
+        class="bg-green-400 h-full flex items-center justify-center text-xs font-medium text-green-900 cursor-default"
         :style="{ width: learningPercent + '%' }"
+        :title="`Learning: ${buckets['learning']?.points || 0} pts (${learningPercent}%)`"
       >
         <span v-if="learningPercent >= 10">{{ learningPercent }}%</span>
       </div>

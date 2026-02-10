@@ -135,15 +135,13 @@ async function fetchSprintIssues(sprintId) {
 
   while (startAt < total) {
     const data = await jiraRequest(
-      `/rest/agile/1.0/sprint/${sprintId}/issue?startAt=${startAt}&maxResults=${maxResults}&fields=summary,issuetype,status,assignee,story_points,customfield_10004,resolution,resolutiondate`
+      `/rest/agile/1.0/sprint/${sprintId}/issue?startAt=${startAt}&maxResults=${maxResults}&fields=summary,issuetype,status,assignee,customfield_12310243,resolution,resolutiondate`
     );
 
     total = data.total;
 
     issues.push(...data.issues.map(issue => {
-      const storyPoints = issue.fields.story_points
-        || issue.fields.customfield_10004
-        || null;
+      const storyPoints = issue.fields.customfield_12310243 ?? null;
 
       return {
         key: issue.key,
@@ -587,10 +585,53 @@ app.post('/api/teams', function(req, res) {
 app.get('/api/dashboard-summary', function(req, res) {
   try {
     const data = readFromStorage('dashboard-summary.json');
-    if (!data) {
+    if (data) {
+      return res.json(data);
+    }
+
+    // Build dashboard summary on-the-fly from existing sprint data
+    const boardsData = readFromStorage('boards.json');
+    if (!boardsData || !boardsData.boards) {
       return res.json({ lastUpdated: null, boards: {} });
     }
-    res.json(data);
+
+    const teamsData = readFromStorage('teams.json');
+    const enabledBoardIds = new Set(
+      teamsData?.teams?.filter(t => t.enabled !== false).map(t => t.boardId) || boardsData.boards.map(b => b.id)
+    );
+
+    const summary = { lastUpdated: boardsData.lastUpdated, boards: {} };
+
+    for (const board of boardsData.boards) {
+      if (!enabledBoardIds.has(board.id)) continue;
+
+      const boardSprints = readFromStorage(`sprints/board-${board.id}.json`);
+      if (!boardSprints?.sprints?.length) continue;
+
+      // Pick active sprint, or most recent closed
+      const activeSprint = boardSprints.sprints.find(s => s.state === 'active');
+      const dashSprint = activeSprint || [...boardSprints.sprints]
+        .filter(s => s.state === 'closed')
+        .sort((a, b) => new Date(b.startDate) - new Date(a.startDate))[0];
+
+      if (!dashSprint) continue;
+
+      const sprintData = readFromStorage(`sprints/${dashSprint.id}.json`);
+      if (!sprintData?.summary) continue;
+
+      summary.boards[board.id] = {
+        sprint: {
+          id: dashSprint.id,
+          name: dashSprint.name,
+          state: dashSprint.state,
+          startDate: dashSprint.startDate,
+          endDate: dashSprint.endDate
+        },
+        summary: sprintData.summary
+      };
+    }
+
+    res.json(summary);
   } catch (error) {
     console.error('Read dashboard summary error:', error);
     res.status(500).json({ error: error.message });

@@ -105,4 +105,24 @@ describe('DashboardGrid', () => {
     // Board 3 has no sprint data — should be null
     expect(cards[2].props('sprintData')).toBeNull()
   })
+
+  it('renders allocation legend with color swatches', () => {
+    const wrapper = mount(DashboardGrid, {
+      props: { boards: mockBoards, boardSprintData: mockBoardSprintData }
+    })
+
+    const legend = wrapper.find('[data-testid="allocation-legend"]')
+    expect(legend.exists()).toBe(true)
+    expect(legend.text()).toContain('Bugs & Tech Debt')
+    expect(legend.text()).toContain('Feature Work')
+    expect(legend.text()).toContain('Learning')
+  })
+
+  it('does not render legend when no boards', () => {
+    const wrapper = mount(DashboardGrid, {
+      props: { boards: [], boardSprintData: {} }
+    })
+
+    expect(wrapper.find('[data-testid="allocation-legend"]').exists()).toBe(false)
+  })
 })

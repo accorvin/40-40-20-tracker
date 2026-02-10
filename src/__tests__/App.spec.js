@@ -7,6 +7,7 @@ import { ref } from 'vue'
 import App from '../App.vue'
 import BoardSettings from '../components/BoardSettings.vue'
 import DashboardGrid from '../components/DashboardGrid.vue'
+import TeamDetail from '../components/TeamDetail.vue'
 
 // Mock useAuth composable
 vi.mock('../composables/useAuth', () => ({
@@ -77,13 +78,41 @@ describe('App', () => {
     }
   }
 
-  beforeEach(() => {
-    fetch.mockReset()
-    localStorageMock.getItem.mockReset()
-    localStorageMock.setItem.mockReset()
-    localStorageMock.removeItem.mockReset()
+  const mockSprintsResponse = {
+    sprints: [
+      { id: 100, name: 'Sprint 42', state: 'active', startDate: '2026-02-03', endDate: '2026-02-14' },
+      { id: 101, name: 'Sprint 43', state: 'future', startDate: '2026-02-17', endDate: '2026-02-28' },
+      { id: 99, name: 'Sprint 41', state: 'closed', startDate: '2026-01-20', endDate: '2026-01-31' }
+    ]
+  }
 
-    fetch.mockImplementation((url) => {
+  // Matches the actual API response format: flat issues array, no percentage, no top-level completedPoints
+  const mockSprintIssuesResponse = {
+    sprintId: 100,
+    sprintName: 'Sprint 42',
+    sprintState: 'active',
+    startDate: '2026-02-03',
+    endDate: '2026-02-14',
+    boardId: 1,
+    lastUpdated: '2026-02-09T12:00:00Z',
+    summary: {
+      totalPoints: 45,
+      estimatedIssueCount: 10,
+      unestimatedIssueCount: 1,
+      buckets: {
+        'bugs-tech-debt': { points: 20, issueCount: 4, completedPoints: 10 },
+        'feature-work': { points: 25, issueCount: 6, completedPoints: 10 },
+        'learning': { points: 0, issueCount: 0, completedPoints: 0 }
+      }
+    },
+    issues: [
+      { key: 'RHOAIENG-1', summary: 'Fix bug', url: 'https://issues.redhat.com/browse/RHOAIENG-1', storyPoints: 5, status: 'Done', completed: true, bucket: 'bugs-tech-debt' },
+      { key: 'RHOAIENG-2', summary: 'Feature', url: 'https://issues.redhat.com/browse/RHOAIENG-2', storyPoints: 8, status: 'In Progress', completed: false, bucket: 'feature-work' }
+    ]
+  }
+
+  function setupFetchMock(overrides = {}) {
+    fetch.mockImplementation((url, options) => {
       if (url.endsWith('/boards')) {
         return Promise.resolve({
           ok: true,
@@ -102,8 +131,35 @@ describe('App', () => {
           json: async () => ({ status: 'started' })
         })
       }
+      if (url.match(/\/boards\/\d+\/sprints$/)) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => overrides.sprints || mockSprintsResponse
+        })
+      }
+      if (url.match(/\/sprints\/\d+\/issues$/)) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => overrides.sprintIssues || mockSprintIssuesResponse
+        })
+      }
+      if (url.endsWith('/teams') && (!options || options.method === 'GET' || !options.method)) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ teams: [] })
+        })
+      }
       return Promise.reject(new Error(`Unknown URL: ${url}`))
     })
+  }
+
+  beforeEach(() => {
+    fetch.mockReset()
+    localStorageMock.getItem.mockReset()
+    localStorageMock.setItem.mockReset()
+    localStorageMock.removeItem.mockReset()
+
+    setupFetchMock()
   })
 
   it('renders app title', async () => {
@@ -181,8 +237,10 @@ describe('App', () => {
 
     const grid = wrapper.findComponent(DashboardGrid)
     grid.vm.$emit('select-team', mockBoardsResponse.boards[0])
-    await wrapper.vm.$nextTick()
+    await flushPromises()
 
+    const teamDetail = wrapper.findComponent(TeamDetail)
+    expect(teamDetail.exists()).toBe(true)
     expect(wrapper.text()).toContain('Team Alpha')
     expect(wrapper.text()).toContain('Back to Dashboard')
   })
@@ -194,16 +252,72 @@ describe('App', () => {
     // Navigate to team detail
     const grid = wrapper.findComponent(DashboardGrid)
     grid.vm.$emit('select-team', mockBoardsResponse.boards[0])
-    await wrapper.vm.$nextTick()
+    await flushPromises()
 
-    // Click back button
-    const backButton = wrapper.findAll('button').find(b => b.text().includes('Back to Dashboard'))
-    await backButton.trigger('click')
+    // Emit back from TeamDetail
+    const teamDetail = wrapper.findComponent(TeamDetail)
+    teamDetail.vm.$emit('back')
     await wrapper.vm.$nextTick()
 
     // Should show dashboard again
     const gridAgain = wrapper.findComponent(DashboardGrid)
     expect(gridAgain.exists()).toBe(true)
+  })
+
+  it('fetches sprints and issues when navigating to team detail', async () => {
+    const wrapper = mount(App)
+    await flushPromises()
+
+    fetch.mockClear()
+    setupFetchMock()
+
+    const grid = wrapper.findComponent(DashboardGrid)
+    grid.vm.$emit('select-team', mockBoardsResponse.boards[0])
+    await flushPromises()
+
+    // Should have fetched sprints for board 1
+    const sprintCalls = fetch.mock.calls.filter(([url]) => url.match(/\/boards\/1\/sprints$/))
+    expect(sprintCalls).toHaveLength(1)
+
+    // Should have fetched issues for the active sprint (id: 100)
+    const issueCalls = fetch.mock.calls.filter(([url]) => url.match(/\/sprints\/100\/issues$/))
+    expect(issueCalls).toHaveLength(1)
+  })
+
+  it('passes sprint data to TeamDetail component', async () => {
+    const wrapper = mount(App)
+    await flushPromises()
+
+    const grid = wrapper.findComponent(DashboardGrid)
+    grid.vm.$emit('select-team', mockBoardsResponse.boards[0])
+    await flushPromises()
+
+    const teamDetail = wrapper.findComponent(TeamDetail)
+    expect(teamDetail.props('sprints')).toHaveLength(3)
+    expect(teamDetail.props('selectedSprint').id).toBe(100)
+    expect(teamDetail.props('sprintData')).toBeDefined()
+    expect(teamDetail.props('sprintData').summary.totalPoints).toBe(45)
+  })
+
+  it('loads new sprint data when sprint is changed', async () => {
+    const wrapper = mount(App)
+    await flushPromises()
+
+    const grid = wrapper.findComponent(DashboardGrid)
+    grid.vm.$emit('select-team', mockBoardsResponse.boards[0])
+    await flushPromises()
+
+    fetch.mockClear()
+    setupFetchMock()
+
+    // Change sprint
+    const teamDetail = wrapper.findComponent(TeamDetail)
+    teamDetail.vm.$emit('select-sprint', 99)
+    await flushPromises()
+
+    // Should have fetched issues for sprint 99
+    const issueCalls = fetch.mock.calls.filter(([url]) => url.match(/\/sprints\/99\/issues$/))
+    expect(issueCalls).toHaveLength(1)
   })
 
   it('shows loading overlay during data fetch', async () => {
@@ -272,29 +386,6 @@ describe('App', () => {
     const wrapper = mount(App)
     await flushPromises()
 
-    // Add mock for /teams GET since BoardSettings will call it
-    fetch.mockImplementation((url, options) => {
-      if (url.endsWith('/boards')) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => mockBoardsResponse
-        })
-      }
-      if (url.endsWith('/dashboard-summary')) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => mockDashboardSummaryResponse
-        })
-      }
-      if (url.endsWith('/teams') && (!options || options.method === 'GET' || !options.method)) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({ teams: [] })
-        })
-      }
-      return Promise.reject(new Error(`Unknown URL: ${url}`))
-    })
-
     const settingsButton = wrapper.findAll('button').find(b => b.attributes('title') === 'Board Settings')
     await settingsButton.trigger('click')
     await flushPromises()
@@ -306,28 +397,6 @@ describe('App', () => {
   it('navigates back to dashboard from board settings', async () => {
     const wrapper = mount(App)
     await flushPromises()
-
-    fetch.mockImplementation((url, options) => {
-      if (url.endsWith('/boards')) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => mockBoardsResponse
-        })
-      }
-      if (url.endsWith('/dashboard-summary')) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => mockDashboardSummaryResponse
-        })
-      }
-      if (url.endsWith('/teams') && (!options || options.method === 'GET' || !options.method)) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({ teams: [] })
-        })
-      }
-      return Promise.reject(new Error(`Unknown URL: ${url}`))
-    })
 
     // Navigate to settings
     const settingsButton = wrapper.findAll('button').find(b => b.attributes('title') === 'Board Settings')

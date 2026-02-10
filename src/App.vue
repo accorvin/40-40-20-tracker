@@ -124,21 +124,17 @@
         <LoadingOverlay v-if="isLoading" />
       </main>
 
-      <!-- Team Detail View (placeholder for Phase 5) -->
-      <main v-else-if="currentView === 'team-detail'" class="container mx-auto px-6 py-6">
-        <button
-          @click="currentView = 'dashboard'"
-          class="mb-4 text-primary-600 hover:text-primary-800 font-medium flex items-center gap-1"
-        >
-          <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
-          </svg>
-          Back to Dashboard
-        </button>
-        <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <h2 class="text-xl font-bold text-gray-900">{{ selectedTeam?.displayName || selectedTeam?.name }}</h2>
-          <p class="text-gray-500 mt-2">Team detail view coming in Phase 5.</p>
-        </div>
+      <!-- Team Detail View -->
+      <main v-else-if="currentView === 'team-detail'">
+        <TeamDetail
+          :board="selectedTeam"
+          :sprints="teamSprints"
+          :selectedSprint="selectedSprint"
+          :sprintData="teamSprintData"
+          :isLoading="isTeamDetailLoading"
+          @select-sprint="handleSelectSprint"
+          @back="currentView = 'dashboard'"
+        />
       </main>
 
       <!-- Board Settings View -->
@@ -166,9 +162,10 @@ import AuthGuard from './components/AuthGuard.vue'
 import BoardSettings from './components/BoardSettings.vue'
 import DashboardGrid from './components/DashboardGrid.vue'
 import LoadingOverlay from './components/LoadingOverlay.vue'
+import TeamDetail from './components/TeamDetail.vue'
 import Toast from './components/Toast.vue'
 import { useAuth } from './composables/useAuth'
-import { refreshData as apiRefreshData, getBoards, getDashboardSummary } from './services/api'
+import { refreshData as apiRefreshData, getBoards, getDashboardSummary, getSprintsForBoard, getSprintIssues } from './services/api'
 
 export default {
   name: 'App',
@@ -177,6 +174,7 @@ export default {
     BoardSettings,
     DashboardGrid,
     LoadingOverlay,
+    TeamDetail,
     Toast
   },
   setup() {
@@ -192,6 +190,10 @@ export default {
       boards: [],
       boardSprintData: {},
       selectedTeam: null,
+      teamSprints: [],
+      selectedSprint: null,
+      teamSprintData: null,
+      isTeamDetailLoading: false,
       lastUpdated: null,
       isRefreshing: false,
       isLoading: false,
@@ -261,8 +263,95 @@ export default {
 
     handleSelectTeam(board) {
       this.selectedTeam = board
+      this.teamSprints = []
+      this.selectedSprint = null
+      this.teamSprintData = null
       this.currentView = 'team-detail'
       localStorage.setItem('selectedTeam', JSON.stringify({ id: board.id, name: board.name }))
+      this.loadTeamSprints(board.id)
+    },
+
+    async loadTeamSprints(boardId) {
+      this.isTeamDetailLoading = true
+      try {
+        const data = await getSprintsForBoard(boardId)
+        this.teamSprints = data.sprints || []
+
+        // Auto-select active sprint, or most recent closed sprint
+        const activeSprint = this.teamSprints.find(s => s.state === 'active')
+        const selectedSprint = activeSprint || [...this.teamSprints]
+          .filter(s => s.state === 'closed')
+          .sort((a, b) => new Date(b.startDate) - new Date(a.startDate))[0] || null
+
+        if (selectedSprint) {
+          this.selectedSprint = selectedSprint
+          await this.loadSprintIssues(selectedSprint.id)
+        }
+      } catch (error) {
+        console.error('Failed to load team sprints:', error)
+      } finally {
+        this.isTeamDetailLoading = false
+      }
+    },
+
+    async loadSprintIssues(sprintId) {
+      try {
+        const data = await getSprintIssues(sprintId)
+        this.teamSprintData = this.transformSprintData(data)
+      } catch (error) {
+        console.error('Failed to load sprint issues:', error)
+        this.teamSprintData = null
+      }
+    },
+
+    transformSprintData(data) {
+      // Group flat issues array by bucket
+      const issuesByBucket = { 'bugs-tech-debt': [], 'feature-work': [], 'learning': [] }
+      for (const issue of (data.issues || [])) {
+        const bucket = issuesByBucket[issue.bucket]
+        if (bucket) bucket.push(issue)
+      }
+
+      // Add percentage and completedPoints to summary
+      const summary = { ...data.summary }
+      const totalPoints = summary.totalPoints || 0
+
+      let completedPoints = 0
+      if (summary.buckets) {
+        summary.buckets = Object.fromEntries(
+          Object.entries(summary.buckets).map(([key, bucket]) => {
+            completedPoints += bucket.completedPoints || 0
+            return [key, {
+              ...bucket,
+              percentage: totalPoints > 0 ? Math.round((bucket.points / totalPoints) * 100) : 0
+            }]
+          })
+        )
+      }
+      summary.completedPoints = completedPoints
+
+      return {
+        sprint: {
+          id: data.sprintId,
+          name: data.sprintName,
+          state: data.sprintState,
+          startDate: data.startDate,
+          endDate: data.endDate
+        },
+        summary,
+        issues: issuesByBucket
+      }
+    },
+
+    async handleSelectSprint(sprintId) {
+      this.selectedSprint = this.teamSprints.find(s => s.id === sprintId) || null
+      this.teamSprintData = null
+      this.isTeamDetailLoading = true
+      try {
+        await this.loadSprintIssues(sprintId)
+      } finally {
+        this.isTeamDetailLoading = false
+      }
     },
 
     async refreshData(hardRefresh) {
