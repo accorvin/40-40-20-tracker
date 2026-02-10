@@ -248,12 +248,41 @@ app.post('/teams', async function(req, res) {
   }
 });
 
+/**
+ * GET /dashboard-summary - Get pre-computed dashboard summary
+ */
+app.get('/dashboard-summary', async function(req, res) {
+  try {
+    const authHeader = req.headers.authorization;
+    const verification = await verifyFirebaseToken(authHeader);
+
+    if (!verification.valid) {
+      return res.status(401).json({ error: verification.error });
+    }
+
+    console.log(`Reading dashboard summary (user: ${verification.email})`);
+
+    const data = await readFromS3('dashboard-summary.json');
+
+    if (!data) {
+      return res.json({ lastUpdated: null, boards: {} });
+    }
+
+    res.json(data);
+
+  } catch (error) {
+    console.error('Read dashboard summary error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Handle OPTIONS for CORS preflight
 app.options('/boards', function(req, res) { res.status(200).end(); });
 app.options('/boards/*', function(req, res) { res.status(200).end(); });
 app.options('/sprints', function(req, res) { res.status(200).end(); });
 app.options('/sprints/*', function(req, res) { res.status(200).end(); });
 app.options('/teams', function(req, res) { res.status(200).end(); });
+app.options('/dashboard-summary', function(req, res) { res.status(200).end(); });
 
 app.listen(3000, function() {
   console.log("dataReader app started");

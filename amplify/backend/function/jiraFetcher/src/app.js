@@ -11,6 +11,7 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const awsServerlessExpressMiddleware = require('aws-serverless-express/middleware');
 const { S3Client, GetObjectCommand, PutObjectCommand } = require('@aws-sdk/client-s3');
+const { LambdaClient, InvokeCommand } = require('@aws-sdk/client-lambda');
 const { SSMClient, GetParameterCommand } = require('@aws-sdk/client-ssm');
 const fetch = require('node-fetch');
 const { verifyFirebaseToken } = require('./verifyToken');
@@ -30,6 +31,7 @@ app.use(function(req, res, next) {
 // AWS Clients
 const s3Client = new S3Client({ region: process.env.AWS_REGION || 'us-east-1' });
 const ssmClient = new SSMClient({ region: process.env.AWS_REGION || 'us-east-1' });
+const lambdaClient = new LambdaClient({ region: process.env.AWS_REGION || 'us-east-1' });
 
 const S3_BUCKET = process.env.S3_BUCKET;
 const JIRA_HOST = process.env.JIRA_HOST || 'https://issues.redhat.com';
@@ -393,63 +395,55 @@ app.post('/discover-boards', async function(req, res) {
 });
 
 /**
- * POST /refresh - Fetch all data from Jira, classify, and upload to S3
+ * Perform the actual refresh work. Called from both Express handler (via async
+ * self-invocation) and direct Lambda invocation.
  */
-app.post('/refresh', async function(req, res) {
+async function performRefresh({ projectKey, hardRefresh }) {
+  console.log(`Starting refresh for project ${projectKey} (hardRefresh: ${hardRefresh})`);
+  const refreshStart = Date.now();
+
+  // Step 1: Fetch all scrum boards
+  console.log('Fetching boards...');
+  const allBoards = await fetchBoards(projectKey);
+  console.log(`Found ${allBoards.length} scrum boards`);
+
+  // Filter to enabled boards only
+  const teamsData = await readFromS3('teams.json');
+  let boards = allBoards;
+  if (teamsData && teamsData.teams) {
+    const teamMap = new Map(teamsData.teams.map(t => [t.boardId, t]));
+    boards = allBoards.filter(b => {
+      const team = teamMap.get(b.id);
+      return !team || team.enabled !== false;
+    });
+    const skipped = allBoards.length - boards.length;
+    if (skipped > 0) {
+      console.log(`Skipping ${skipped} disabled boards`);
+    }
+  }
+
+  // Step 2: Fetch feature work keys for classification
+  console.log('Fetching feature work keys...');
+  let featureWorkKeys;
   try {
-    // Verify Firebase token
-    const authHeader = req.headers.authorization;
-    const verification = await verifyFirebaseToken(authHeader);
+    featureWorkKeys = await fetchFeatureWorkKeys();
+  } catch (error) {
+    console.warn('Failed to fetch feature work keys, all issues will default to bugs-tech-debt:', error.message);
+    featureWorkKeys = new Set();
+  }
 
-    if (!verification.valid) {
-      return res.status(401).json({ error: verification.error });
-    }
+  // Step 3: Process boards in parallel (concurrency of 5)
+  const CONCURRENCY = 5;
+  const boardResults = [];
 
-    const projectKey = req.body.projectKey || 'RHOAIENG';
-
-    console.log(`Starting refresh for project ${projectKey} (user: ${verification.email})`);
-    const refreshStart = Date.now();
-
-    // Step 1: Fetch all scrum boards
-    console.log('Fetching boards...');
-    const allBoards = await fetchBoards(projectKey);
-    console.log(`Found ${allBoards.length} scrum boards`);
-
-    // Filter to enabled boards only
-    const teamsData = await readFromS3('teams.json');
-    let boards = allBoards;
-    if (teamsData && teamsData.teams) {
-      const teamMap = new Map(teamsData.teams.map(t => [t.boardId, t]));
-      boards = allBoards.filter(b => {
-        const team = teamMap.get(b.id);
-        return !team || team.enabled !== false;
-      });
-      const skipped = allBoards.length - boards.length;
-      if (skipped > 0) {
-        console.log(`Skipping ${skipped} disabled boards`);
-      }
-    }
-
-    // Step 2: Fetch feature work keys for classification
-    console.log('Fetching feature work keys...');
-    let featureWorkKeys;
-    try {
-      featureWorkKeys = await fetchFeatureWorkKeys();
-    } catch (error) {
-      console.warn('Failed to fetch feature work keys, all issues will default to bugs-tech-debt:', error.message);
-      featureWorkKeys = new Set();
-    }
-
-    // Step 3: For each board, fetch sprints and issues
-    const sprintResults = [];
-
-    for (const board of boards) {
+  for (let i = 0; i < boards.length; i += CONCURRENCY) {
+    const chunk = boards.slice(i, i + CONCURRENCY);
+    const chunkResults = await Promise.all(chunk.map(async (board) => {
       console.log(`Processing board: ${board.name} (${board.id})`);
 
       const sprints = await fetchSprints(board.id);
-      console.log(`  Found ${sprints.length} sprints`);
+      console.log(`  [${board.name}] Found ${sprints.length} sprints`);
 
-      // Process active and recent closed sprints (last 5 closed)
       const activeSprints = sprints.filter(s => s.state === 'active');
       const futureSprints = sprints.filter(s => s.state === 'future');
       const closedSprints = sprints
@@ -458,23 +452,35 @@ app.post('/refresh', async function(req, res) {
         .slice(0, 5);
 
       const sprintsToProcess = [...activeSprints, ...futureSprints, ...closedSprints];
+      const sprintResults = [];
 
       for (const sprint of sprintsToProcess) {
-        console.log(`  Processing sprint: ${sprint.name} (${sprint.state})`);
+        // Closed-sprint caching: skip Jira fetch if cached and not hard refresh
+        if (!hardRefresh && sprint.state === 'closed') {
+          const cached = await readFromS3(`sprints/${sprint.id}.json`);
+          if (cached) {
+            console.log(`  [${board.name}] Using cached data for closed sprint: ${sprint.name}`);
+            sprintResults.push({
+              sprintId: sprint.id,
+              sprintName: sprint.name,
+              state: sprint.state,
+              issueCount: cached.issues?.length || 0,
+              totalPoints: cached.summary?.totalPoints || 0,
+              summary: cached.summary
+            });
+            continue;
+          }
+        }
+
+        console.log(`  [${board.name}] Fetching sprint: ${sprint.name} (${sprint.state})`);
 
         const rawIssues = await fetchSprintIssues(sprint.id);
 
-        // Classify and enrich issues
-        const classifiedIssues = rawIssues.map(issue => {
-          const bucket = classifyIssue(issue, featureWorkKeys);
-          const completed = issue.resolution != null;
-
-          return {
-            ...issue,
-            bucket,
-            completed
-          };
-        });
+        const classifiedIssues = rawIssues.map(issue => ({
+          ...issue,
+          bucket: classifyIssue(issue, featureWorkKeys),
+          completed: issue.resolution != null
+        }));
 
         const summary = buildSprintSummary(classifiedIssues);
 
@@ -493,7 +499,6 @@ app.post('/refresh', async function(req, res) {
           summary
         };
 
-        // Upload sprint data to S3
         await uploadToS3(`sprints/${sprint.id}.json`, sprintData);
 
         sprintResults.push({
@@ -501,7 +506,8 @@ app.post('/refresh', async function(req, res) {
           sprintName: sprint.name,
           state: sprint.state,
           issueCount: classifiedIssues.length,
-          totalPoints: summary.totalPoints
+          totalPoints: summary.totalPoints,
+          summary
         });
       }
 
@@ -519,46 +525,124 @@ app.post('/refresh', async function(req, res) {
           completeDate: s.completeDate
         }))
       });
+
+      // Pick the active sprint (or most recent closed) for dashboard summary
+      const dashboardSprint = activeSprints[0] || closedSprints[0] || null;
+      const dashboardSprintResult = dashboardSprint
+        ? sprintResults.find(r => r.sprintId === dashboardSprint.id)
+        : null;
+
+      return {
+        board,
+        sprintResults,
+        dashboardSprint,
+        dashboardSprintResult
+      };
+    }));
+
+    boardResults.push(...chunkResults);
+  }
+
+  // Step 4: Upload boards index
+  await uploadToS3('boards.json', {
+    lastUpdated: new Date().toISOString(),
+    boards: allBoards
+  });
+
+  // Step 5: Upload teams config if it doesn't exist
+  const existingTeams = await readFromS3('teams.json');
+  if (!existingTeams) {
+    await uploadToS3('teams.json', {
+      teams: allBoards.map(b => ({
+        boardId: b.id,
+        boardName: b.name,
+        displayName: b.name.replace(/^RHOAIENG\s*[-–]\s*/, ''),
+        enabled: true
+      }))
+    });
+  }
+
+  // Step 6: Generate dashboard-summary.json
+  const dashboardSummary = {
+    lastUpdated: new Date().toISOString(),
+    boards: {}
+  };
+
+  for (const { board, dashboardSprint, dashboardSprintResult } of boardResults) {
+    if (dashboardSprint && dashboardSprintResult) {
+      dashboardSummary.boards[board.id] = {
+        sprint: {
+          id: dashboardSprint.id,
+          name: dashboardSprint.name,
+          state: dashboardSprint.state,
+          startDate: dashboardSprint.startDate,
+          endDate: dashboardSprint.endDate
+        },
+        summary: dashboardSprintResult.summary
+      };
+    }
+  }
+
+  await uploadToS3('dashboard-summary.json', dashboardSummary);
+
+  const allSprintResults = boardResults.flatMap(r => r.sprintResults);
+  const refreshElapsed = ((Date.now() - refreshStart) / 1000).toFixed(1);
+  console.log(`Refresh complete: ${boards.length} boards, ${allSprintResults.length} sprints, ${featureWorkKeys.size} feature keys (${refreshElapsed}s)`);
+
+  return {
+    success: true,
+    projectKey,
+    boardCount: boards.length,
+    sprintCount: allSprintResults.length,
+    featureWorkKeysFound: featureWorkKeys.size
+  };
+}
+
+/**
+ * POST /refresh - Kick off async refresh via Lambda self-invocation
+ */
+app.post('/refresh', async function(req, res) {
+  try {
+    const authHeader = req.headers.authorization;
+    const verification = await verifyFirebaseToken(authHeader);
+
+    if (!verification.valid) {
+      return res.status(401).json({ error: verification.error });
     }
 
-    // Step 4: Upload boards index
-    await uploadToS3('boards.json', {
-      lastUpdated: new Date().toISOString(),
-      boards: allBoards
-    });
+    const projectKey = req.body.projectKey || 'RHOAIENG';
+    const hardRefresh = req.body.hardRefresh || false;
 
-    // Step 5: Upload teams config if it doesn't exist
-    const existingTeams = await readFromS3('teams.json');
-    if (!existingTeams) {
-      await uploadToS3('teams.json', {
-        teams: allBoards.map(b => ({
-          boardId: b.id,
-          boardName: b.name,
-          displayName: b.name.replace(/^RHOAIENG\s*[-–]\s*/, ''),
-          enabled: true
-        }))
+    console.log(`Refresh requested by ${verification.email} (hardRefresh: ${hardRefresh})`);
+
+    // Invoke self asynchronously
+    const functionName = process.env.AWS_LAMBDA_FUNCTION_NAME;
+    if (functionName) {
+      const command = new InvokeCommand({
+        FunctionName: functionName,
+        InvocationType: 'Event',
+        Payload: JSON.stringify({
+          action: 'refresh',
+          projectKey,
+          hardRefresh
+        })
+      });
+      await lambdaClient.send(command);
+      console.log('Async refresh invocation sent');
+    } else {
+      // Fallback for local testing via Lambda
+      setImmediate(() => {
+        performRefresh({ projectKey, hardRefresh }).catch(error => {
+          console.error('Background refresh error:', error);
+        });
       });
     }
 
-    const result = {
-      success: true,
-      projectKey,
-      boardCount: boards.length,
-      sprintCount: sprintResults.length,
-      featureWorkKeysFound: featureWorkKeys.size,
-      sprints: sprintResults
-    };
-
-    const refreshElapsed = ((Date.now() - refreshStart) / 1000).toFixed(1);
-    console.log(`Refresh complete: ${boards.length} boards, ${sprintResults.length} sprints, ${featureWorkKeys.size} feature keys (${refreshElapsed}s)`);
-
-    res.json(result);
+    res.json({ status: 'started' });
 
   } catch (error) {
     console.error('Refresh error:', error);
-    res.status(500).json({
-      error: error.message
-    });
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -576,3 +660,4 @@ app.listen(3000, function() {
 });
 
 module.exports = app;
+module.exports.performRefresh = performRefresh;

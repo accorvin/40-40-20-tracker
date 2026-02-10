@@ -41,11 +41,13 @@ async function getAuthToken() {
 }
 
 /**
- * Refresh data from Jira and upload to S3
+ * Refresh data from Jira (async — returns immediately, processes in background)
  * @param {string} projectKey - Jira project key (e.g., 'RHOAIENG')
- * @returns {Promise<{success: boolean, summary: object}>}
+ * @param {object} options
+ * @param {boolean} options.hardRefresh - If true, re-fetches closed sprints too
+ * @returns {Promise<{status: string}>}
  */
-export async function refreshData(projectKey) {
+export async function refreshData(projectKey, { hardRefresh = false } = {}) {
   try {
     const token = await getAuthToken()
 
@@ -55,7 +57,7 @@ export async function refreshData(projectKey) {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ projectKey })
+      body: JSON.stringify({ projectKey, hardRefresh })
     })
 
     if (!response.ok) {
@@ -72,6 +74,38 @@ export async function refreshData(projectKey) {
     }
 
     throw new Error(error.message || 'Failed to refresh data')
+  }
+}
+
+/**
+ * Get pre-computed dashboard summary
+ * @returns {Promise<{lastUpdated: string, boards: object}>}
+ */
+export async function getDashboardSummary() {
+  try {
+    const token = await getAuthToken()
+
+    const response = await fetch(`${API_ENDPOINT}/dashboard-summary`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json()
+
+      if (response.status === 401) {
+        throw new Error('Authentication failed. Please sign in again.')
+      }
+
+      throw new Error(errorData.error || `HTTP ${response.status}`)
+    }
+
+    return await response.json()
+  } catch (error) {
+    console.error('Get dashboard summary error:', error)
+    throw error
   }
 }
 

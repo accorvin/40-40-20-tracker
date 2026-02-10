@@ -75,7 +75,7 @@
         "Role": { "Fn::GetAtt": ["LambdaExecutionRole", "Arn"] },
         "Runtime": "nodejs18.x",
         "Layers": [],
-        "Timeout": 120
+        "Timeout": 900
       }
     },
     "LambdaExecutionRole": {
@@ -149,6 +149,13 @@
                 {
                   "Fn::Sub": "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/40-40-20-tracker/*/jira-token"
                 }
+              ],
+              "Effect": "Allow"
+            },
+            {
+              "Action": ["lambda:InvokeFunction"],
+              "Resource": [
+                { "Fn::GetAtt": ["LambdaFunction", "Arn"] }
               ],
               "Effect": "Allow"
             }

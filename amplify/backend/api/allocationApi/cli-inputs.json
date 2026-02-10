@@ -20,6 +20,11 @@
       "name": "/teams",
       "lambdaFunction": "dataReader",
       "permissions": { "setting": "open" }
+    },
+    "/dashboard-summary": {
+      "name": "/dashboard-summary",
+      "lambdaFunction": "dataReader",
+      "permissions": { "setting": "open" }
     }
   }
 }

@@ -6,5 +6,9 @@
   {
     "Action": ["ssm:GetParameter"],
     "Resource": ["arn:aws:ssm:us-east-1:*:parameter/40-40-20-tracker/*/jira-token"]
+  },
+  {
+    "Action": ["lambda:InvokeFunction"],
+    "Resource": ["*"]
   }
 ]

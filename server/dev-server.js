@@ -282,50 +282,50 @@ app.post('/api/discover-boards', async function(req, res) {
   }
 });
 
-app.post('/api/refresh', async function(req, res) {
+async function performRefreshWork(projectKey, hardRefresh) {
+  console.log(`\nStarting refresh for project ${projectKey} (hardRefresh: ${hardRefresh})`);
+
+  // Fetch boards
+  console.log('Fetching boards...');
+  const allBoards = await fetchBoards(projectKey);
+  console.log(`Found ${allBoards.length} scrum boards`);
+
+  // Filter to enabled boards only
+  const teamsData = readFromStorage('teams.json');
+  let boards = allBoards;
+  if (teamsData && teamsData.teams) {
+    const teamMap = new Map(teamsData.teams.map(t => [t.boardId, t]));
+    boards = allBoards.filter(b => {
+      const team = teamMap.get(b.id);
+      return !team || team.enabled !== false;
+    });
+    const skipped = allBoards.length - boards.length;
+    if (skipped > 0) {
+      console.log(`Skipping ${skipped} disabled boards`);
+    }
+  }
+
+  // Fetch feature work keys
+  console.log('Fetching feature work keys...');
+  let featureWorkKeys;
   try {
-    const projectKey = req.body.projectKey || 'RHOAIENG';
+    featureWorkKeys = await fetchFeatureWorkKeys();
+  } catch (error) {
+    console.warn('Failed to fetch feature work keys, defaulting all to bugs-tech-debt:', error.message);
+    featureWorkKeys = new Set();
+  }
 
-    console.log(`\nStarting refresh for project ${projectKey}`);
+  // Process boards in parallel (concurrency of 5)
+  const CONCURRENCY = 5;
+  const boardResults = [];
 
-    // Fetch boards
-    console.log('Fetching boards...');
-    const allBoards = await fetchBoards(projectKey);
-    console.log(`Found ${allBoards.length} scrum boards`);
-
-    // Filter to enabled boards only
-    const teamsData = readFromStorage('teams.json');
-    let boards = allBoards;
-    if (teamsData && teamsData.teams) {
-      const teamMap = new Map(teamsData.teams.map(t => [t.boardId, t]));
-      boards = allBoards.filter(b => {
-        const team = teamMap.get(b.id);
-        return !team || team.enabled !== false;
-      });
-      const skipped = allBoards.length - boards.length;
-      if (skipped > 0) {
-        console.log(`Skipping ${skipped} disabled boards`);
-      }
-    }
-
-    // Fetch feature work keys
-    console.log('Fetching feature work keys...');
-    let featureWorkKeys;
-    try {
-      featureWorkKeys = await fetchFeatureWorkKeys();
-    } catch (error) {
-      console.warn('Failed to fetch feature work keys, defaulting all to bugs-tech-debt:', error.message);
-      featureWorkKeys = new Set();
-    }
-
-    // Process each board
-    const sprintResults = [];
-
-    for (const board of boards) {
+  for (let i = 0; i < boards.length; i += CONCURRENCY) {
+    const chunk = boards.slice(i, i + CONCURRENCY);
+    const chunkResults = await Promise.all(chunk.map(async (board) => {
       console.log(`Processing board: ${board.name} (${board.id})`);
 
       const sprints = await fetchSprints(board.id);
-      console.log(`  Found ${sprints.length} sprints`);
+      console.log(`  [${board.name}] Found ${sprints.length} sprints`);
 
       const activeSprints = sprints.filter(s => s.state === 'active');
       const futureSprints = sprints.filter(s => s.state === 'future');
@@ -335,9 +335,27 @@ app.post('/api/refresh', async function(req, res) {
         .slice(0, 5);
 
       const sprintsToProcess = [...activeSprints, ...futureSprints, ...closedSprints];
+      const sprintResults = [];
 
       for (const sprint of sprintsToProcess) {
-        console.log(`  Processing sprint: ${sprint.name} (${sprint.state})`);
+        // Closed-sprint caching: skip Jira fetch if cached and not hard refresh
+        if (!hardRefresh && sprint.state === 'closed') {
+          const cached = readFromStorage(`sprints/${sprint.id}.json`);
+          if (cached) {
+            console.log(`  [${board.name}] Using cached data for closed sprint: ${sprint.name}`);
+            sprintResults.push({
+              sprintId: sprint.id,
+              sprintName: sprint.name,
+              state: sprint.state,
+              issueCount: cached.issues?.length || 0,
+              totalPoints: cached.summary?.totalPoints || 0,
+              summary: cached.summary
+            });
+            continue;
+          }
+        }
+
+        console.log(`  [${board.name}] Fetching sprint: ${sprint.name} (${sprint.state})`);
 
         const rawIssues = await fetchSprintIssues(sprint.id);
 
@@ -369,7 +387,8 @@ app.post('/api/refresh', async function(req, res) {
           sprintName: sprint.name,
           state: sprint.state,
           issueCount: classifiedIssues.length,
-          totalPoints: summary.totalPoints
+          totalPoints: summary.totalPoints,
+          summary
         });
       }
 
@@ -386,42 +405,88 @@ app.post('/api/refresh', async function(req, res) {
           completeDate: s.completeDate
         }))
       });
-    }
 
-    writeToStorage('boards.json', {
-      lastUpdated: new Date().toISOString(),
-      boards: allBoards
-    });
+      // Pick the active sprint (or most recent closed) for dashboard summary
+      const dashboardSprint = activeSprints[0] || closedSprints[0] || null;
+      const dashboardSprintResult = dashboardSprint
+        ? sprintResults.find(r => r.sprintId === dashboardSprint.id)
+        : null;
 
-    // Auto-generate teams config if it doesn't exist
-    const existingTeams = readFromStorage('teams.json');
-    if (!existingTeams) {
-      writeToStorage('teams.json', {
-        teams: allBoards.map(b => ({
-          boardId: b.id,
-          boardName: b.name,
-          displayName: b.name.replace(/^RHOAIENG\s*[-–]\s*/, ''),
-          enabled: true
-        }))
-      });
-    }
+      return {
+        board,
+        sprintResults,
+        dashboardSprint,
+        dashboardSprintResult
+      };
+    }));
 
-    const result = {
-      success: true,
-      projectKey,
-      boardCount: boards.length,
-      sprintCount: sprintResults.length,
-      featureWorkKeysFound: featureWorkKeys.size,
-      sprints: sprintResults
-    };
-
-    console.log(`\nRefresh complete: ${boards.length} boards, ${sprintResults.length} sprints`);
-    res.json(result);
-
-  } catch (error) {
-    console.error('Refresh error:', error);
-    res.status(500).json({ error: error.message });
+    boardResults.push(...chunkResults);
   }
+
+  writeToStorage('boards.json', {
+    lastUpdated: new Date().toISOString(),
+    boards: allBoards
+  });
+
+  // Auto-generate teams config if it doesn't exist
+  const existingTeams = readFromStorage('teams.json');
+  if (!existingTeams) {
+    writeToStorage('teams.json', {
+      teams: allBoards.map(b => ({
+        boardId: b.id,
+        boardName: b.name,
+        displayName: b.name.replace(/^RHOAIENG\s*[-–]\s*/, ''),
+        enabled: true
+      }))
+    });
+  }
+
+  // Generate dashboard-summary.json
+  const dashboardSummary = {
+    lastUpdated: new Date().toISOString(),
+    boards: {}
+  };
+
+  for (const { board, dashboardSprint, dashboardSprintResult } of boardResults) {
+    if (dashboardSprint && dashboardSprintResult) {
+      dashboardSummary.boards[board.id] = {
+        sprint: {
+          id: dashboardSprint.id,
+          name: dashboardSprint.name,
+          state: dashboardSprint.state,
+          startDate: dashboardSprint.startDate,
+          endDate: dashboardSprint.endDate
+        },
+        summary: dashboardSprintResult.summary
+      };
+    }
+  }
+
+  writeToStorage('dashboard-summary.json', dashboardSummary);
+
+  const allSprintResults = boardResults.flatMap(r => r.sprintResults);
+  console.log(`\nRefresh complete: ${boards.length} boards, ${allSprintResults.length} sprints`);
+
+  return {
+    success: true,
+    projectKey,
+    boardCount: boards.length,
+    sprintCount: allSprintResults.length,
+    featureWorkKeysFound: featureWorkKeys.size
+  };
+}
+
+app.post('/api/refresh', function(req, res) {
+  const projectKey = req.body.projectKey || 'RHOAIENG';
+  const hardRefresh = req.body.hardRefresh || false;
+
+  res.json({ status: 'started' });
+
+  setImmediate(() => {
+    performRefreshWork(projectKey, hardRefresh).catch(error => {
+      console.error('Background refresh error:', error);
+    });
+  });
 });
 
 // ─── Routes: dataReader ───
@@ -515,6 +580,19 @@ app.post('/api/teams', function(req, res) {
     res.json({ success: true, teams });
   } catch (error) {
     console.error('Save teams error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/dashboard-summary', function(req, res) {
+  try {
+    const data = readFromStorage('dashboard-summary.json');
+    if (!data) {
+      return res.json({ lastUpdated: null, boards: {} });
+    }
+    res.json(data);
+  } catch (error) {
+    console.error('Read dashboard summary error:', error);
     res.status(500).json({ error: error.message });
   }
 });

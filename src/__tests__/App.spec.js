@@ -45,25 +45,34 @@ describe('App', () => {
     lastUpdated: '2026-02-09T12:00:00Z'
   }
 
-  const mockSprintsResponse = {
-    sprints: [
-      { id: 100, name: 'Sprint 42', state: 'active', startDate: '2026-02-03T00:00:00.000Z', endDate: '2026-02-14T00:00:00.000Z' },
-      { id: 99, name: 'Sprint 41', state: 'closed', startDate: '2026-01-20T00:00:00.000Z', endDate: '2026-02-02T00:00:00.000Z' }
-    ]
-  }
-
-  const mockSprintIssuesResponse = {
-    sprintId: 100,
-    sprintName: 'Sprint 42',
-    issues: [],
-    summary: {
-      totalPoints: 45,
-      estimatedIssueCount: 10,
-      unestimatedIssueCount: 3,
-      buckets: {
-        'bugs-tech-debt': { points: 20, issueCount: 4, completedPoints: 10 },
-        'feature-work': { points: 25, issueCount: 6, completedPoints: 10 },
-        'learning': { points: 0, issueCount: 0, completedPoints: 0 }
+  const mockDashboardSummaryResponse = {
+    lastUpdated: '2026-02-09T12:00:00Z',
+    boards: {
+      1: {
+        sprint: { id: 100, name: 'Sprint 42', state: 'active', startDate: '2026-02-03T00:00:00.000Z', endDate: '2026-02-14T00:00:00.000Z' },
+        summary: {
+          totalPoints: 45,
+          estimatedIssueCount: 10,
+          unestimatedIssueCount: 3,
+          buckets: {
+            'bugs-tech-debt': { points: 20, issueCount: 4, completedPoints: 10 },
+            'feature-work': { points: 25, issueCount: 6, completedPoints: 10 },
+            'learning': { points: 0, issueCount: 0, completedPoints: 0 }
+          }
+        }
+      },
+      2: {
+        sprint: { id: 200, name: 'Sprint 10', state: 'active', startDate: '2026-02-03T00:00:00.000Z', endDate: '2026-02-14T00:00:00.000Z' },
+        summary: {
+          totalPoints: 30,
+          estimatedIssueCount: 8,
+          unestimatedIssueCount: 1,
+          buckets: {
+            'bugs-tech-debt': { points: 15, issueCount: 3, completedPoints: 5 },
+            'feature-work': { points: 15, issueCount: 5, completedPoints: 5 },
+            'learning': { points: 0, issueCount: 0, completedPoints: 0 }
+          }
+        }
       }
     }
   }
@@ -81,16 +90,16 @@ describe('App', () => {
           json: async () => mockBoardsResponse
         })
       }
-      if (url.match(/\/boards\/\d+\/sprints$/)) {
+      if (url.endsWith('/dashboard-summary')) {
         return Promise.resolve({
           ok: true,
-          json: async () => mockSprintsResponse
+          json: async () => mockDashboardSummaryResponse
         })
       }
-      if (url.match(/\/sprints\/\d+\/issues$/)) {
+      if (url.endsWith('/refresh')) {
         return Promise.resolve({
           ok: true,
-          json: async () => mockSprintIssuesResponse
+          json: async () => ({ status: 'started' })
         })
       }
       return Promise.reject(new Error(`Unknown URL: ${url}`))
@@ -129,12 +138,16 @@ describe('App', () => {
     expect(grid.exists()).toBe(true)
   })
 
-  it('fetches boards on mount', async () => {
+  it('fetches boards and dashboard summary on mount', async () => {
     mount(App)
     await flushPromises()
 
     expect(fetch).toHaveBeenCalledWith(
       expect.stringContaining('/boards'),
+      expect.any(Object)
+    )
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/dashboard-summary'),
       expect.any(Object)
     )
   })
@@ -206,16 +219,10 @@ describe('App', () => {
           json: async () => mockBoardsResponse
         }))
       }
-      if (url.match(/\/boards\/\d+\/sprints$/)) {
+      if (url.endsWith('/dashboard-summary')) {
         return Promise.resolve({
           ok: true,
-          json: async () => mockSprintsResponse
-        })
-      }
-      if (url.match(/\/sprints\/\d+\/issues$/)) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => mockSprintIssuesResponse
+          json: async () => mockDashboardSummaryResponse
         })
       }
       return Promise.reject(new Error(`Unknown URL: ${url}`))
@@ -234,7 +241,13 @@ describe('App', () => {
   })
 
   it('handles boards fetch error gracefully', async () => {
-    fetch.mockImplementation(() => {
+    fetch.mockImplementation((url) => {
+      if (url.endsWith('/dashboard-summary')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => mockDashboardSummaryResponse
+        })
+      }
       return Promise.reject(new Error('Network error'))
     })
 
@@ -267,22 +280,16 @@ describe('App', () => {
           json: async () => mockBoardsResponse
         })
       }
+      if (url.endsWith('/dashboard-summary')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => mockDashboardSummaryResponse
+        })
+      }
       if (url.endsWith('/teams') && (!options || options.method === 'GET' || !options.method)) {
         return Promise.resolve({
           ok: true,
           json: async () => ({ teams: [] })
-        })
-      }
-      if (url.match(/\/boards\/\d+\/sprints$/)) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => mockSprintsResponse
-        })
-      }
-      if (url.match(/\/sprints\/\d+\/issues$/)) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => mockSprintIssuesResponse
         })
       }
       return Promise.reject(new Error(`Unknown URL: ${url}`))
@@ -307,22 +314,16 @@ describe('App', () => {
           json: async () => mockBoardsResponse
         })
       }
+      if (url.endsWith('/dashboard-summary')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => mockDashboardSummaryResponse
+        })
+      }
       if (url.endsWith('/teams') && (!options || options.method === 'GET' || !options.method)) {
         return Promise.resolve({
           ok: true,
           json: async () => ({ teams: [] })
-        })
-      }
-      if (url.match(/\/boards\/\d+\/sprints$/)) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => mockSprintsResponse
-        })
-      }
-      if (url.match(/\/sprints\/\d+\/issues$/)) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => mockSprintIssuesResponse
         })
       }
       return Promise.reject(new Error(`Unknown URL: ${url}`))
@@ -343,20 +344,7 @@ describe('App', () => {
     expect(grid.exists()).toBe(true)
   })
 
-  it('fetches sprint data per board after loading boards', async () => {
-    mount(App)
-    await flushPromises()
-
-    // Should have called sprints endpoint for each board
-    const sprintCalls = fetch.mock.calls.filter(([url]) => url.match(/\/boards\/\d+\/sprints$/))
-    expect(sprintCalls).toHaveLength(2)
-
-    // Should have called sprint issues for the active sprint of each board
-    const issueCalls = fetch.mock.calls.filter(([url]) => url.match(/\/sprints\/\d+\/issues$/))
-    expect(issueCalls).toHaveLength(2)
-  })
-
-  it('passes boardSprintData to DashboardGrid', async () => {
+  it('passes boardSprintData from dashboard summary to DashboardGrid', async () => {
     const wrapper = mount(App)
     await flushPromises()
 
@@ -364,10 +352,96 @@ describe('App', () => {
     const sprintData = grid.props('boardSprintData')
     expect(sprintData).toBeDefined()
     expect(sprintData[1]).toBeDefined()
-    expect(sprintData[1].sprint.id).toBe(100) // Active sprint selected
+    expect(sprintData[1].sprint.id).toBe(100)
     expect(sprintData[1].summary).toBeDefined()
     expect(sprintData[1].summary.totalPoints).toBe(45)
     expect(sprintData[1].summary.buckets).toBeDefined()
     expect(sprintData[2]).toBeDefined()
+  })
+
+  it('sends async refresh and shows toast', async () => {
+    const wrapper = mount(App)
+    await flushPromises()
+
+    // Click the main Refresh button
+    const refreshButton = wrapper.findAll('button').find(b => b.text() === 'Refresh' && !b.attributes('title'))
+    await refreshButton.trigger('click')
+    await flushPromises()
+
+    // Should have called /refresh
+    const refreshCalls = fetch.mock.calls.filter(([url]) => url.endsWith('/refresh'))
+    expect(refreshCalls).toHaveLength(1)
+
+    // Body should include hardRefresh: false
+    const body = JSON.parse(refreshCalls[0][1].body)
+    expect(body.hardRefresh).toBe(false)
+
+    // Should show a toast
+    expect(wrapper.text()).toContain('Refresh started')
+  })
+
+  it('shows refresh dropdown with Full Refresh option', async () => {
+    const wrapper = mount(App)
+    await flushPromises()
+
+    // Click the chevron dropdown button
+    const chevronButton = wrapper.findAll('button').find(b => {
+      return b.find('svg path[d="M19 9l-7 7-7-7"]').exists()
+    })
+    expect(chevronButton.exists()).toBe(true)
+
+    await chevronButton.trigger('click')
+    await wrapper.vm.$nextTick()
+
+    // Should show dropdown with Full Refresh option
+    expect(wrapper.text()).toContain('Full Refresh')
+  })
+
+  it('sends hardRefresh when Full Refresh is clicked', async () => {
+    const wrapper = mount(App)
+    await flushPromises()
+
+    // Open dropdown
+    const chevronButton = wrapper.findAll('button').find(b => {
+      return b.find('svg path[d="M19 9l-7 7-7-7"]').exists()
+    })
+    await chevronButton.trigger('click')
+    await wrapper.vm.$nextTick()
+
+    // Click Full Refresh
+    const fullRefreshButton = wrapper.findAll('button').find(b => b.text() === 'Full Refresh')
+    await fullRefreshButton.trigger('click')
+    await flushPromises()
+
+    // Should have called /refresh with hardRefresh: true
+    const refreshCalls = fetch.mock.calls.filter(([url]) => url.endsWith('/refresh'))
+    expect(refreshCalls).toHaveLength(1)
+    const body = JSON.parse(refreshCalls[0][1].body)
+    expect(body.hardRefresh).toBe(true)
+  })
+
+  it('loads only 2 API calls on mount (boards + dashboard-summary)', async () => {
+    fetch.mockReset()
+    fetch.mockImplementation((url) => {
+      if (url.endsWith('/boards')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => mockBoardsResponse
+        })
+      }
+      if (url.endsWith('/dashboard-summary')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => mockDashboardSummaryResponse
+        })
+      }
+      return Promise.reject(new Error(`Unknown URL: ${url}`))
+    })
+
+    mount(App)
+    await flushPromises()
+
+    // Should only have 2 fetch calls: /boards and /dashboard-summary
+    expect(fetch).toHaveBeenCalledTimes(2)
   })
 })

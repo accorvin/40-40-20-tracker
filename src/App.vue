@@ -21,33 +21,52 @@
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
               </svg>
             </button>
-            <button
-              @click="refreshData"
-              :disabled="isRefreshing"
-              class="px-3 py-1 text-sm bg-white text-primary-700 rounded-md font-medium hover:bg-primary-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1"
-            >
-              <svg
-                v-if="isRefreshing"
-                class="animate-spin h-4 w-4"
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24"
+            <div class="relative">
+              <div class="flex items-stretch">
+                <button
+                  @click="refreshData(false)"
+                  :disabled="isRefreshing"
+                  class="px-3 py-1 text-sm bg-white text-primary-700 rounded-l-md font-medium hover:bg-primary-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1"
+                >
+                  <svg
+                    class="h-4 w-4"
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  Refresh
+                </button>
+                <button
+                  @click="showRefreshMenu = !showRefreshMenu"
+                  :disabled="isRefreshing"
+                  class="px-1.5 py-1 text-sm bg-white text-primary-700 rounded-r-md font-medium hover:bg-primary-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors border-l border-primary-200"
+                >
+                  <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+              </div>
+              <div
+                v-if="showRefreshMenu"
+                class="absolute right-0 mt-1 w-44 bg-white rounded-md shadow-lg py-1 z-10"
               >
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-              <svg
-                v-else
-                class="h-4 w-4"
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-              {{ isRefreshing ? 'Refreshing...' : 'Refresh' }}
-            </button>
+                <button
+                  @click="refreshData(false); showRefreshMenu = false"
+                  class="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                >
+                  Refresh
+                </button>
+                <button
+                  @click="refreshData(true); showRefreshMenu = false"
+                  class="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                >
+                  Full Refresh
+                </button>
+              </div>
+            </div>
 
             <!-- User Avatar and Sign Out -->
             <div class="relative" v-if="authUser">
@@ -102,7 +121,7 @@
           @select-team="handleSelectTeam"
         />
 
-        <LoadingOverlay v-if="isLoading || isRefreshing" />
+        <LoadingOverlay v-if="isLoading" />
       </main>
 
       <!-- Team Detail View (placeholder for Phase 5) -->
@@ -149,7 +168,7 @@ import DashboardGrid from './components/DashboardGrid.vue'
 import LoadingOverlay from './components/LoadingOverlay.vue'
 import Toast from './components/Toast.vue'
 import { useAuth } from './composables/useAuth'
-import { refreshData as apiRefreshData, getBoards, getSprintsForBoard, getSprintIssues } from './services/api'
+import { refreshData as apiRefreshData, getBoards, getDashboardSummary } from './services/api'
 
 export default {
   name: 'App',
@@ -178,51 +197,42 @@ export default {
       isLoading: false,
       isInitialized: false,
       showUserMenu: false,
+      showRefreshMenu: false,
       avatarLoadError: false,
       toasts: []
     }
   },
   watch: {
-    currentView(newView) {
-      if (newView !== 'dashboard') {
-        this.cancelSprintLoading()
-      }
-    },
     authUser(newUser, oldUser) {
       this.avatarLoadError = false
 
       if (newUser && !oldUser) {
-        this.isLoading = true
-        this.loadBoards().then(() => {
-          if (this.currentView === 'dashboard') {
-            this.loadBoardSprints().catch(() => {})
-          }
-        }).catch(() => {}).finally(() => {
-          this.isLoading = false
-        })
+        this.loadInitialData()
       }
     }
   },
   mounted() {
     document.addEventListener('click', this.handleClickOutside)
 
-    // Load initial data if user is already authenticated
     if (this.authUser) {
-      this.isLoading = true
-      this.loadBoards().then(() => {
-        if (this.currentView === 'dashboard') {
-          this.loadBoardSprints().catch(() => {})
-        }
-      }).catch(() => {}).finally(() => {
-        this.isLoading = false
-      })
+      this.loadInitialData()
     }
   },
   beforeUnmount() {
     document.removeEventListener('click', this.handleClickOutside)
-    this.cancelSprintLoading()
   },
   methods: {
+    async loadInitialData() {
+      this.isLoading = true
+      try {
+        await Promise.all([this.loadBoards(), this.loadDashboardSummary()])
+      } catch {
+        // Errors handled in individual methods
+      } finally {
+        this.isLoading = false
+      }
+    },
+
     async loadBoards() {
       try {
         const data = await getBoards()
@@ -230,60 +240,22 @@ export default {
         this.lastUpdated = data.lastUpdated || null
       } catch (error) {
         console.error('Failed to load boards:', error)
-
-        if (!error.message.includes('Authentication')) {
-          // Silently handle - boards will be empty, user can click Refresh
-        }
-
         this.boards = []
       }
       this.isInitialized = true
     },
 
-    cancelSprintLoading() {
-      if (this._sprintAbortController) {
-        this._sprintAbortController.abort()
-        this._sprintAbortController = null
-      }
-    },
-
-    async loadBoardSprints() {
-      if (this.boards.length === 0 || this.currentView !== 'dashboard') return
-
-      this.cancelSprintLoading()
-      this._sprintAbortController = new AbortController()
-      const { signal } = this._sprintAbortController
-
-      const CONCURRENCY = 2
-      const sprintData = {}
-
-      for (let i = 0; i < this.boards.length; i += CONCURRENCY) {
-        if (signal.aborted || this.currentView !== 'dashboard') return
-
-        const chunk = this.boards.slice(i, i + CONCURRENCY)
-        const results = await Promise.all(
-          chunk.map(async (board) => {
-            try {
-              const { sprints } = await getSprintsForBoard(board.id, { signal })
-              const activeSprint = sprints.find(s => s.state === 'active')
-              const sprint = activeSprint || sprints.find(s => s.state === 'closed') || null
-
-              if (!sprint) return { boardId: board.id, data: null }
-
-              const sprintIssuesData = await getSprintIssues(sprint.id, { signal })
-              return { boardId: board.id, data: { sprint, summary: sprintIssuesData.summary } }
-            } catch {
-              return { boardId: board.id, data: null }
-            }
-          })
-        )
-
-        if (signal.aborted) return
-
-        for (const { boardId, data } of results) {
-          if (data) sprintData[boardId] = data
+    async loadDashboardSummary() {
+      try {
+        const data = await getDashboardSummary()
+        if (data && data.boards) {
+          this.boardSprintData = data.boards
+          if (data.lastUpdated) {
+            this.lastUpdated = data.lastUpdated
+          }
         }
-        this.boardSprintData = { ...sprintData }
+      } catch (error) {
+        console.error('Failed to load dashboard summary:', error)
       }
     },
 
@@ -293,24 +265,23 @@ export default {
       localStorage.setItem('selectedTeam', JSON.stringify({ id: board.id, name: board.name }))
     },
 
-    async refreshData() {
+    async refreshData(hardRefresh) {
       this.isRefreshing = true
 
       try {
-        const result = await apiRefreshData('RHOAIENG')
-
-        if (result.success) {
-          await this.loadBoards()
-          this.loadBoardSprints().catch(() => {})
-          this.showToast(`Successfully refreshed data!`)
-        }
+        await apiRefreshData('RHOAIENG', { hardRefresh })
+        this.showToast(
+          hardRefresh
+            ? 'Full refresh started — data will update in the background'
+            : 'Refresh started — data will update in the background'
+        )
       } catch (error) {
         console.error('Refresh error:', error)
 
         if (error.message.includes('Authentication')) {
           alert('Your session has expired. Please refresh the page and sign in again.')
         } else {
-          alert(`Failed to refresh: ${error.message}`)
+          alert(`Failed to start refresh: ${error.message}`)
         }
       } finally {
         this.isRefreshing = false
@@ -320,8 +291,7 @@ export default {
     async handleSettingsSaved() {
       this.showToast('Board settings saved')
       this.currentView = 'dashboard'
-      await this.loadBoards()
-      this.loadBoardSprints().catch(() => {})
+      await Promise.all([this.loadBoards(), this.loadDashboardSummary()])
     },
 
     async handleSignOut() {
@@ -330,9 +300,9 @@ export default {
     },
 
     handleClickOutside(event) {
-      const userMenu = event.target.closest('.relative')
-      if (!userMenu) {
+      if (!event.target.closest('.relative')) {
         this.showUserMenu = false
+        this.showRefreshMenu = false
       }
     },
 
