@@ -73,19 +73,27 @@ async function getJiraToken() {
  */
 async function jiraRequest(path) {
   const token = await getJiraToken();
+  const url = `${JIRA_HOST}${path}`;
 
-  const response = await fetch(`${JIRA_HOST}${path}`, {
+  console.log(`[Jira API] GET ${url}`);
+  const startTime = Date.now();
+
+  const response = await fetch(url, {
     headers: {
       'Authorization': `Bearer ${token}`,
       'Accept': 'application/json'
     }
   });
 
+  const elapsed = Date.now() - startTime;
+
   if (!response.ok) {
     const text = await response.text();
+    console.error(`[Jira API] FAILED ${response.status} ${url} (${elapsed}ms)`);
     throw new Error(`Jira API error (${response.status}): ${text}`);
   }
 
+  console.log(`[Jira API] OK ${response.status} ${url} (${elapsed}ms)`);
   return response.json();
 }
 
@@ -400,6 +408,7 @@ app.post('/refresh', async function(req, res) {
     const projectKey = req.body.projectKey || 'RHOAIENG';
 
     console.log(`Starting refresh for project ${projectKey} (user: ${verification.email})`);
+    const refreshStart = Date.now();
 
     // Step 1: Fetch all scrum boards
     console.log('Fetching boards...');
@@ -468,6 +477,8 @@ app.post('/refresh', async function(req, res) {
         });
 
         const summary = buildSprintSummary(classifiedIssues);
+
+        console.log(`    ${classifiedIssues.length} issues, ${summary.totalPoints} pts | bugs-tech-debt: ${summary.buckets['bugs-tech-debt'].points} pts, feature-work: ${summary.buckets['feature-work'].points} pts | ${summary.unestimatedIssueCount} unestimated`);
 
         const sprintData = {
           sprintId: sprint.id,
@@ -538,7 +549,8 @@ app.post('/refresh', async function(req, res) {
       sprints: sprintResults
     };
 
-    console.log(`Refresh complete: ${boards.length} boards, ${sprintResults.length} sprints`);
+    const refreshElapsed = ((Date.now() - refreshStart) / 1000).toFixed(1);
+    console.log(`Refresh complete: ${boards.length} boards, ${sprintResults.length} sprints, ${featureWorkKeys.size} feature keys (${refreshElapsed}s)`);
 
     res.json(result);
 

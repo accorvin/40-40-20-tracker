@@ -98,6 +98,7 @@
       <main v-if="currentView === 'dashboard'" class="relative">
         <DashboardGrid
           :boards="boards"
+          :boardSprintData="boardSprintData"
           @select-team="handleSelectTeam"
         />
 
@@ -148,7 +149,7 @@ import DashboardGrid from './components/DashboardGrid.vue'
 import LoadingOverlay from './components/LoadingOverlay.vue'
 import Toast from './components/Toast.vue'
 import { useAuth } from './composables/useAuth'
-import { refreshData as apiRefreshData, getBoards } from './services/api'
+import { refreshData as apiRefreshData, getBoards, getSprintsForBoard, getSprintIssues } from './services/api'
 
 export default {
   name: 'App',
@@ -170,6 +171,7 @@ export default {
     return {
       currentView: 'dashboard',
       boards: [],
+      boardSprintData: {},
       selectedTeam: null,
       lastUpdated: null,
       isRefreshing: false,
@@ -181,12 +183,21 @@ export default {
     }
   },
   watch: {
+    currentView(newView) {
+      if (newView !== 'dashboard') {
+        this.cancelSprintLoading()
+      }
+    },
     authUser(newUser, oldUser) {
       this.avatarLoadError = false
 
       if (newUser && !oldUser) {
         this.isLoading = true
-        this.loadBoards().catch(() => {}).finally(() => {
+        this.loadBoards().then(() => {
+          if (this.currentView === 'dashboard') {
+            this.loadBoardSprints().catch(() => {})
+          }
+        }).catch(() => {}).finally(() => {
           this.isLoading = false
         })
       }
@@ -198,13 +209,18 @@ export default {
     // Load initial data if user is already authenticated
     if (this.authUser) {
       this.isLoading = true
-      this.loadBoards().catch(() => {}).finally(() => {
+      this.loadBoards().then(() => {
+        if (this.currentView === 'dashboard') {
+          this.loadBoardSprints().catch(() => {})
+        }
+      }).catch(() => {}).finally(() => {
         this.isLoading = false
       })
     }
   },
   beforeUnmount() {
     document.removeEventListener('click', this.handleClickOutside)
+    this.cancelSprintLoading()
   },
   methods: {
     async loadBoards() {
@@ -224,6 +240,53 @@ export default {
       this.isInitialized = true
     },
 
+    cancelSprintLoading() {
+      if (this._sprintAbortController) {
+        this._sprintAbortController.abort()
+        this._sprintAbortController = null
+      }
+    },
+
+    async loadBoardSprints() {
+      if (this.boards.length === 0 || this.currentView !== 'dashboard') return
+
+      this.cancelSprintLoading()
+      this._sprintAbortController = new AbortController()
+      const { signal } = this._sprintAbortController
+
+      const CONCURRENCY = 2
+      const sprintData = {}
+
+      for (let i = 0; i < this.boards.length; i += CONCURRENCY) {
+        if (signal.aborted || this.currentView !== 'dashboard') return
+
+        const chunk = this.boards.slice(i, i + CONCURRENCY)
+        const results = await Promise.all(
+          chunk.map(async (board) => {
+            try {
+              const { sprints } = await getSprintsForBoard(board.id, { signal })
+              const activeSprint = sprints.find(s => s.state === 'active')
+              const sprint = activeSprint || sprints.find(s => s.state === 'closed') || null
+
+              if (!sprint) return { boardId: board.id, data: null }
+
+              const sprintIssuesData = await getSprintIssues(sprint.id, { signal })
+              return { boardId: board.id, data: { sprint, summary: sprintIssuesData.summary } }
+            } catch {
+              return { boardId: board.id, data: null }
+            }
+          })
+        )
+
+        if (signal.aborted) return
+
+        for (const { boardId, data } of results) {
+          if (data) sprintData[boardId] = data
+        }
+        this.boardSprintData = { ...sprintData }
+      }
+    },
+
     handleSelectTeam(board) {
       this.selectedTeam = board
       this.currentView = 'team-detail'
@@ -238,6 +301,7 @@ export default {
 
         if (result.success) {
           await this.loadBoards()
+          this.loadBoardSprints().catch(() => {})
           this.showToast(`Successfully refreshed data!`)
         }
       } catch (error) {
@@ -257,6 +321,7 @@ export default {
       this.showToast('Board settings saved')
       this.currentView = 'dashboard'
       await this.loadBoards()
+      this.loadBoardSprints().catch(() => {})
     },
 
     async handleSignOut() {

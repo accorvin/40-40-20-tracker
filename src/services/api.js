@@ -116,7 +116,7 @@ export async function getBoards() {
  * @param {number} boardId - Board ID
  * @returns {Promise<{sprints: Array}>}
  */
-export async function getSprintsForBoard(boardId) {
+export async function getSprintsForBoard(boardId, { signal } = {}) {
   try {
     const token = await getAuthToken()
 
@@ -124,7 +124,8 @@ export async function getSprintsForBoard(boardId) {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${token}`
-      }
+      },
+      signal
     })
 
     if (!response.ok) {
@@ -149,7 +150,7 @@ export async function getSprintsForBoard(boardId) {
  * @param {number} sprintId - Sprint ID
  * @returns {Promise<object>} Sprint data with issues and summary
  */
-export async function getSprintIssues(sprintId) {
+export async function getSprintIssues(sprintId, { signal } = {}) {
   try {
     const token = await getAuthToken()
 
@@ -157,7 +158,8 @@ export async function getSprintIssues(sprintId) {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${token}`
-      }
+      },
+      signal
     })
 
     if (!response.ok) {

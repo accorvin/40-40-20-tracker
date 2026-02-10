@@ -45,6 +45,29 @@ describe('App', () => {
     lastUpdated: '2026-02-09T12:00:00Z'
   }
 
+  const mockSprintsResponse = {
+    sprints: [
+      { id: 100, name: 'Sprint 42', state: 'active', startDate: '2026-02-03T00:00:00.000Z', endDate: '2026-02-14T00:00:00.000Z' },
+      { id: 99, name: 'Sprint 41', state: 'closed', startDate: '2026-01-20T00:00:00.000Z', endDate: '2026-02-02T00:00:00.000Z' }
+    ]
+  }
+
+  const mockSprintIssuesResponse = {
+    sprintId: 100,
+    sprintName: 'Sprint 42',
+    issues: [],
+    summary: {
+      totalPoints: 45,
+      estimatedIssueCount: 10,
+      unestimatedIssueCount: 3,
+      buckets: {
+        'bugs-tech-debt': { points: 20, issueCount: 4, completedPoints: 10 },
+        'feature-work': { points: 25, issueCount: 6, completedPoints: 10 },
+        'learning': { points: 0, issueCount: 0, completedPoints: 0 }
+      }
+    }
+  }
+
   beforeEach(() => {
     fetch.mockReset()
     localStorageMock.getItem.mockReset()
@@ -56,6 +79,18 @@ describe('App', () => {
         return Promise.resolve({
           ok: true,
           json: async () => mockBoardsResponse
+        })
+      }
+      if (url.match(/\/boards\/\d+\/sprints$/)) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => mockSprintsResponse
+        })
+      }
+      if (url.match(/\/sprints\/\d+\/issues$/)) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => mockSprintIssuesResponse
         })
       }
       return Promise.reject(new Error(`Unknown URL: ${url}`))
@@ -171,6 +206,18 @@ describe('App', () => {
           json: async () => mockBoardsResponse
         }))
       }
+      if (url.match(/\/boards\/\d+\/sprints$/)) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => mockSprintsResponse
+        })
+      }
+      if (url.match(/\/sprints\/\d+\/issues$/)) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => mockSprintIssuesResponse
+        })
+      }
       return Promise.reject(new Error(`Unknown URL: ${url}`))
     })
 
@@ -226,6 +273,18 @@ describe('App', () => {
           json: async () => ({ teams: [] })
         })
       }
+      if (url.match(/\/boards\/\d+\/sprints$/)) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => mockSprintsResponse
+        })
+      }
+      if (url.match(/\/sprints\/\d+\/issues$/)) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => mockSprintIssuesResponse
+        })
+      }
       return Promise.reject(new Error(`Unknown URL: ${url}`))
     })
 
@@ -254,6 +313,18 @@ describe('App', () => {
           json: async () => ({ teams: [] })
         })
       }
+      if (url.match(/\/boards\/\d+\/sprints$/)) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => mockSprintsResponse
+        })
+      }
+      if (url.match(/\/sprints\/\d+\/issues$/)) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => mockSprintIssuesResponse
+        })
+      }
       return Promise.reject(new Error(`Unknown URL: ${url}`))
     })
 
@@ -270,5 +341,33 @@ describe('App', () => {
     // Should show dashboard again
     const grid = wrapper.findComponent(DashboardGrid)
     expect(grid.exists()).toBe(true)
+  })
+
+  it('fetches sprint data per board after loading boards', async () => {
+    mount(App)
+    await flushPromises()
+
+    // Should have called sprints endpoint for each board
+    const sprintCalls = fetch.mock.calls.filter(([url]) => url.match(/\/boards\/\d+\/sprints$/))
+    expect(sprintCalls).toHaveLength(2)
+
+    // Should have called sprint issues for the active sprint of each board
+    const issueCalls = fetch.mock.calls.filter(([url]) => url.match(/\/sprints\/\d+\/issues$/))
+    expect(issueCalls).toHaveLength(2)
+  })
+
+  it('passes boardSprintData to DashboardGrid', async () => {
+    const wrapper = mount(App)
+    await flushPromises()
+
+    const grid = wrapper.findComponent(DashboardGrid)
+    const sprintData = grid.props('boardSprintData')
+    expect(sprintData).toBeDefined()
+    expect(sprintData[1]).toBeDefined()
+    expect(sprintData[1].sprint.id).toBe(100) // Active sprint selected
+    expect(sprintData[1].summary).toBeDefined()
+    expect(sprintData[1].summary.totalPoints).toBe(45)
+    expect(sprintData[1].summary.buckets).toBeDefined()
+    expect(sprintData[2]).toBeDefined()
   })
 })

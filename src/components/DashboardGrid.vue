@@ -15,24 +15,28 @@
     </div>
 
     <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-      <div
+      <TeamCard
         v-for="board in boards"
         :key="board.id"
-        class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 hover:shadow-md hover:border-primary-300 transition-all cursor-pointer"
-        @click="$emit('select-team', board)"
-      >
-        <h3 class="font-semibold text-gray-900 truncate">{{ board.displayName || board.name }}</h3>
-        <p class="text-sm text-gray-500 mt-1">No sprint data yet</p>
-      </div>
+        :board="board"
+        :sprintData="boardSprintData[board.id] || null"
+        @select-team="$emit('select-team', $event)"
+      />
     </div>
   </div>
 </template>
 
 <script setup>
+import TeamCard from './TeamCard.vue'
+
 defineProps({
   boards: {
     type: Array,
     default: () => []
+  },
+  boardSprintData: {
+    type: Object,
+    default: () => ({})
   }
 })
 
