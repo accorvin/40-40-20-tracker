@@ -217,6 +217,75 @@ describe('App', () => {
     expect(grid.props('boards')[0].displayName).toBe('Team Alpha')
   })
 
+  it('does not show stale icon when data is recent', async () => {
+    const recentDate = new Date().toISOString()
+    fetch.mockReset()
+    fetch.mockImplementation((url) => {
+      if (url.endsWith('/boards')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ ...mockBoardsResponse, lastUpdated: recentDate })
+        })
+      }
+      if (url.endsWith('/dashboard-summary')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ ...mockDashboardSummaryResponse, lastUpdated: recentDate })
+        })
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) })
+    })
+
+    const wrapper = mount(App)
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="stale-icon"]').exists()).toBe(false)
+  })
+
+  it('shows stale icon when data is older than 1 hour', async () => {
+    const staleDate = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
+    setupFetchMock()
+    fetch.mockImplementation((url, options) => {
+      if (url.endsWith('/boards')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ ...mockBoardsResponse, lastUpdated: staleDate })
+        })
+      }
+      if (url.endsWith('/dashboard-summary')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ ...mockDashboardSummaryResponse, lastUpdated: staleDate })
+        })
+      }
+      // Fall through to default mock for other URLs
+      return setupFetchMock(), fetch(url, options)
+    })
+
+    // Re-mock cleanly
+    fetch.mockReset()
+    fetch.mockImplementation((url) => {
+      if (url.endsWith('/boards')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ ...mockBoardsResponse, lastUpdated: staleDate })
+        })
+      }
+      if (url.endsWith('/dashboard-summary')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ ...mockDashboardSummaryResponse, lastUpdated: staleDate })
+        })
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) })
+    })
+
+    const wrapper = mount(App)
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="stale-icon"]').exists()).toBe(true)
+  })
+
   it('renders last updated timestamp when data is loaded', async () => {
     const wrapper = mount(App)
     await flushPromises()
@@ -318,6 +387,51 @@ describe('App', () => {
     // Should have fetched issues for sprint 99
     const issueCalls = fetch.mock.calls.filter(([url]) => url.match(/\/sprints\/99\/issues$/))
     expect(issueCalls).toHaveLength(1)
+  })
+
+  it('saves selected sprint to localStorage when sprint is changed', async () => {
+    const wrapper = mount(App)
+    await flushPromises()
+
+    const grid = wrapper.findComponent(DashboardGrid)
+    grid.vm.$emit('select-team', mockBoardsResponse.boards[0])
+    await flushPromises()
+
+    const teamDetail = wrapper.findComponent(TeamDetail)
+    teamDetail.vm.$emit('select-sprint', 99)
+    await flushPromises()
+
+    const savedCall = localStorageMock.setItem.mock.calls.find(
+      ([key]) => key === 'selectedSprints'
+    )
+    expect(savedCall).toBeTruthy()
+    const saved = JSON.parse(savedCall[1])
+    expect(saved[1]).toBe(99)
+  })
+
+  it('restores saved sprint when navigating to team detail', async () => {
+    // Pre-set saved sprint for board 1
+    localStorageMock.getItem.mockImplementation((key) => {
+      if (key === 'selectedSprints') return JSON.stringify({ 1: 99 })
+      return null
+    })
+
+    const wrapper = mount(App)
+    await flushPromises()
+
+    fetch.mockClear()
+    setupFetchMock()
+
+    const grid = wrapper.findComponent(DashboardGrid)
+    grid.vm.$emit('select-team', mockBoardsResponse.boards[0])
+    await flushPromises()
+
+    // Should have fetched issues for sprint 99 (restored), not 100 (active)
+    const issueCalls = fetch.mock.calls.filter(([url]) => url.match(/\/sprints\/99\/issues$/))
+    expect(issueCalls).toHaveLength(1)
+
+    const sprint100Calls = fetch.mock.calls.filter(([url]) => url.match(/\/sprints\/100\/issues$/))
+    expect(sprint100Calls).toHaveLength(0)
   })
 
   it('shows loading overlay during data fetch', async () => {

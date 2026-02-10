@@ -8,7 +8,10 @@
             <h1 class="text-xl font-bold">40-40-20 Sprint Allocation Tracker</h1>
           </div>
           <div class="flex items-center gap-4">
-            <div v-if="lastUpdated" class="text-sm text-primary-100">
+            <div v-if="lastUpdated" class="text-sm flex items-center gap-1.5" :class="isDataStale ? 'text-amber-300' : 'text-primary-100'">
+              <svg v-if="isDataStale" data-testid="stale-icon" class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+              </svg>
               Last Updated: {{ formatDate(lastUpdated) }}
             </div>
             <button
@@ -204,6 +207,13 @@ export default {
       toasts: []
     }
   },
+  computed: {
+    isDataStale() {
+      if (!this.lastUpdated) return false
+      const age = Date.now() - new Date(this.lastUpdated).getTime()
+      return age > 60 * 60 * 1000 // 1 hour
+    }
+  },
   watch: {
     authUser(newUser, oldUser) {
       this.avatarLoadError = false
@@ -277,9 +287,11 @@ export default {
         const data = await getSprintsForBoard(boardId)
         this.teamSprints = data.sprints || []
 
-        // Auto-select active sprint, or most recent closed sprint
+        // Restore previously selected sprint, or default to active/most recent closed
+        const savedSprintId = this.getSavedSprintId(boardId)
+        const savedSprint = savedSprintId ? this.teamSprints.find(s => s.id === savedSprintId) : null
         const activeSprint = this.teamSprints.find(s => s.state === 'active')
-        const selectedSprint = activeSprint || [...this.teamSprints]
+        const selectedSprint = savedSprint || activeSprint || [...this.teamSprints]
           .filter(s => s.state === 'closed')
           .sort((a, b) => new Date(b.startDate) - new Date(a.startDate))[0] || null
 
@@ -345,12 +357,34 @@ export default {
 
     async handleSelectSprint(sprintId) {
       this.selectedSprint = this.teamSprints.find(s => s.id === sprintId) || null
+      if (this.selectedTeam) {
+        this.saveSprintId(this.selectedTeam.id, sprintId)
+      }
       this.teamSprintData = null
       this.isTeamDetailLoading = true
       try {
         await this.loadSprintIssues(sprintId)
       } finally {
         this.isTeamDetailLoading = false
+      }
+    },
+
+    getSavedSprintId(boardId) {
+      try {
+        const saved = JSON.parse(localStorage.getItem('selectedSprints') || '{}')
+        return saved[boardId] || null
+      } catch {
+        return null
+      }
+    },
+
+    saveSprintId(boardId, sprintId) {
+      try {
+        const saved = JSON.parse(localStorage.getItem('selectedSprints') || '{}')
+        saved[boardId] = sprintId
+        localStorage.setItem('selectedSprints', JSON.stringify(saved))
+      } catch {
+        // Ignore localStorage errors
       }
     },
 
