@@ -42,13 +42,28 @@
 
       <div v-else class="divide-y divide-gray-200">
         <div
-          v-for="team in teams"
+          v-for="team in sortedTeams"
           :key="team.boardId"
-          class="flex items-center justify-between py-3 px-3 rounded-md hover:bg-primary-50 even:bg-gray-50 transition-colors"
+          data-testid="team-row"
+          :class="[
+            'flex items-center justify-between py-3 px-3 rounded-md hover:bg-primary-50 even:bg-gray-50 transition-colors',
+            team.stale ? 'opacity-60' : ''
+          ]"
         >
           <div>
-            <span class="font-medium text-gray-900">{{ team.displayName || team.boardName }}</span>
-            <span class="ml-2 text-sm text-gray-500">ID: {{ team.boardId }}</span>
+            <div class="flex items-center gap-2">
+              <span class="font-medium text-gray-900">{{ team.displayName || team.boardName }}</span>
+              <span class="ml-2 text-sm text-gray-500">ID: {{ team.boardId }}</span>
+              <span
+                v-if="team.stale"
+                class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600"
+              >
+                Inactive
+              </span>
+            </div>
+            <p v-if="team.stale" class="text-xs text-gray-400 mt-0.5">
+              {{ team.lastSprintEndDate ? `Last sprint ended ${formatRelativeDate(team.lastSprintEndDate)}` : 'No sprints found' }}
+            </p>
           </div>
           <label class="relative inline-flex items-center cursor-pointer">
             <input
@@ -66,7 +81,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { getTeams, saveTeams, discoverBoards } from '../services/api'
 
 const emit = defineEmits(['back', 'saved'])
@@ -74,6 +89,33 @@ const emit = defineEmits(['back', 'saved'])
 const teams = ref([])
 const isSaving = ref(false)
 const isDiscovering = ref(false)
+
+const sortedTeams = computed(() => {
+  return [...teams.value].sort((a, b) => {
+    if (a.stale && !b.stale) return 1
+    if (!a.stale && b.stale) return -1
+    return 0
+  })
+})
+
+function formatRelativeDate(dateStr) {
+  const date = new Date(dateStr)
+  const now = new Date()
+  const diffMs = now.getTime() - date.getTime()
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+
+  if (diffDays < 30) {
+    return `${diffDays} day${diffDays !== 1 ? 's' : ''} ago`
+  }
+
+  const diffMonths = Math.floor(diffDays / 30)
+  if (diffMonths < 12) {
+    return `${diffMonths} month${diffMonths !== 1 ? 's' : ''} ago`
+  }
+
+  const diffYears = Math.floor(diffMonths / 12)
+  return `${diffYears} year${diffYears !== 1 ? 's' : ''} ago`
+}
 
 async function loadTeams() {
   try {

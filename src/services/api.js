@@ -252,7 +252,7 @@ export async function getTeams() {
 /**
  * Discover boards from Jira (saves boards.json + teams.json without processing sprints)
  * @param {string} projectKey - Jira project key (e.g., 'RHOAIENG')
- * @returns {Promise<{success: boolean, boardCount: number}>}
+ * @returns {Promise<{success: boolean, boardCount: number, staleCount: number}>}
  */
 export async function discoverBoards(projectKey) {
   try {

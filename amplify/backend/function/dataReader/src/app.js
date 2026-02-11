@@ -238,9 +238,12 @@ app.post('/teams', async function(req, res) {
 
     console.log(`Saving ${teams.length} teams config (user: ${verification.email})`);
 
-    await writeToS3('teams.json', { teams });
+    // Mark all teams as manually configured to prevent auto-disable on next discover
+    const teamsWithManualFlag = teams.map(t => ({ ...t, manuallyConfigured: true }));
 
-    res.json({ success: true, teams });
+    await writeToS3('teams.json', { teams: teamsWithManualFlag });
+
+    res.json({ success: true, teams: teamsWithManualFlag });
 
   } catch (error) {
     console.error('Save teams error:', error);

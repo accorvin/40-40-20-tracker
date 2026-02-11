@@ -248,6 +248,70 @@ function classifyIssue(issue, featureWorkKeys) {
 }
 
 /**
+ * Staleness threshold: 90 days in milliseconds
+ */
+const STALE_THRESHOLD_MS = 90 * 24 * 60 * 60 * 1000;
+
+/**
+ * Find the most recent end date among a list of sprints.
+ * Prefers completeDate for closed sprints, falls back to endDate.
+ * @param {Array} sprints
+ * @returns {string|null} ISO date string or null
+ */
+function getLatestSprintEndDate(sprints) {
+  let latest = null;
+
+  for (const sprint of sprints) {
+    const dateStr = sprint.completeDate || sprint.endDate;
+    if (!dateStr) continue;
+
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) continue;
+
+    if (!latest || date > new Date(latest)) {
+      latest = dateStr;
+    }
+  }
+
+  return latest;
+}
+
+/**
+ * Determine whether a board is stale based on its sprints.
+ *
+ * A board is stale if:
+ * - It has no sprints at all, OR
+ * - It has no active/future sprints AND its most recent closed sprint
+ *   ended more than 3 months ago.
+ *
+ * @param {Array} sprints - Sprint objects with state, completeDate, endDate
+ * @param {Date} [now=new Date()] - Current date (injectable for testing)
+ * @returns {{ stale: boolean, lastSprintEndDate: string|null }}
+ */
+function determineStaleness(sprints, now = new Date()) {
+  if (!sprints || sprints.length === 0) {
+    return { stale: true, lastSprintEndDate: null };
+  }
+
+  const hasActiveOrFuture = sprints.some(
+    s => s.state === 'active' || s.state === 'future'
+  );
+
+  if (hasActiveOrFuture) {
+    return { stale: false, lastSprintEndDate: getLatestSprintEndDate(sprints) };
+  }
+
+  const lastSprintEndDate = getLatestSprintEndDate(sprints);
+
+  if (!lastSprintEndDate) {
+    return { stale: true, lastSprintEndDate: null };
+  }
+
+  const elapsed = now.getTime() - new Date(lastSprintEndDate).getTime();
+  return { stale: elapsed > STALE_THRESHOLD_MS, lastSprintEndDate };
+}
+
+/**
  * Build sprint summary from classified issues
  */
 function buildSprintSummary(issues) {
@@ -359,32 +423,66 @@ app.post('/discover-boards', async function(req, res) {
       boards: boards
     });
 
-    // Merge with existing teams config (preserve enabled/disabled state)
-    const existingTeams = await readFromS3('teams.json');
-    if (existingTeams && existingTeams.teams) {
-      const existingMap = new Map(existingTeams.teams.map(t => [t.boardId, t]));
-      const mergedTeams = boards.map(b => {
-        const existing = existingMap.get(b.id);
-        return existing || {
-          boardId: b.id,
-          boardName: b.name,
-          displayName: b.name.replace(/^RHOAIENG\s*[-–]\s*/, ''),
-          enabled: true
-        };
-      });
-      await uploadToS3('teams.json', { teams: mergedTeams });
-    } else {
-      await uploadToS3('teams.json', {
-        teams: boards.map(b => ({
-          boardId: b.id,
-          boardName: b.name,
-          displayName: b.name.replace(/^RHOAIENG\s*[-–]\s*/, ''),
-          enabled: true
-        }))
-      });
+    // Fetch sprints for each board to determine staleness (concurrency of 10)
+    const DISCOVER_CONCURRENCY = 10;
+    const boardStaleness = new Map();
+
+    for (let i = 0; i < boards.length; i += DISCOVER_CONCURRENCY) {
+      const chunk = boards.slice(i, i + DISCOVER_CONCURRENCY);
+      const results = await Promise.all(chunk.map(async (board) => {
+        try {
+          const sprints = await fetchSprints(board.id);
+          return { boardId: board.id, ...determineStaleness(sprints) };
+        } catch (error) {
+          console.warn(`Failed to fetch sprints for board ${board.id}, marking as not stale:`, error.message);
+          return { boardId: board.id, stale: false, lastSprintEndDate: null };
+        }
+      }));
+      results.forEach(r => boardStaleness.set(r.boardId, r));
     }
 
-    res.json({ success: true, boardCount: boards.length });
+    const staleCount = [...boardStaleness.values()].filter(s => s.stale).length;
+    console.log(`Staleness check: ${staleCount} of ${boards.length} boards are stale`);
+
+    // Merge with existing teams config (preserve enabled/disabled state + manual overrides)
+    const existingTeams = await readFromS3('teams.json');
+    const existingMap = existingTeams?.teams
+      ? new Map(existingTeams.teams.map(t => [t.boardId, t]))
+      : new Map();
+
+    const mergedTeams = boards.map(b => {
+      const staleness = boardStaleness.get(b.id) || { stale: false, lastSprintEndDate: null };
+      const existing = existingMap.get(b.id);
+
+      if (existing) {
+        // Existing board: update staleness fields, auto-disable only if stale and not manually configured
+        const updated = {
+          ...existing,
+          boardName: b.name,
+          stale: staleness.stale,
+          lastSprintEndDate: staleness.lastSprintEndDate
+        };
+        if (staleness.stale && !existing.manuallyConfigured) {
+          updated.enabled = false;
+        }
+        return updated;
+      }
+
+      // New board: auto-set enabled based on staleness
+      return {
+        boardId: b.id,
+        boardName: b.name,
+        displayName: b.name.replace(/^RHOAIENG\s*[-–]\s*/, ''),
+        enabled: !staleness.stale,
+        stale: staleness.stale,
+        lastSprintEndDate: staleness.lastSprintEndDate,
+        manuallyConfigured: false
+      };
+    });
+
+    await uploadToS3('teams.json', { teams: mergedTeams });
+
+    res.json({ success: true, boardCount: boards.length, staleCount });
   } catch (error) {
     console.error('Discover boards error:', error);
     res.status(500).json({ error: error.message });
@@ -658,3 +756,4 @@ app.listen(3000, function() {
 
 module.exports = app;
 module.exports.performRefresh = performRefresh;
+module.exports.determineStaleness = determineStaleness;
