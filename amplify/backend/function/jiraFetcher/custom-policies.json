@@ -4,6 +4,10 @@
     "Resource": ["arn:aws:s3:::acorvin-40-40-20-tracker/*"]
   },
   {
+    "Action": ["s3:ListBucket"],
+    "Resource": ["arn:aws:s3:::acorvin-40-40-20-tracker"]
+  },
+  {
     "Action": ["ssm:GetParameter"],
     "Resource": ["arn:aws:ssm:us-east-1:*:parameter/jira-tracker-app/*/jira-token"]
   },

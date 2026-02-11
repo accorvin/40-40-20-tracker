@@ -25,6 +25,11 @@
       "name": "/dashboard-summary",
       "lambdaFunction": "dataReader",
       "permissions": { "setting": "open" }
+    },
+    "/discover-boards": {
+      "name": "/discover-boards",
+      "lambdaFunction": "jiraFetcher",
+      "permissions": { "setting": "open" }
     }
   }
 }

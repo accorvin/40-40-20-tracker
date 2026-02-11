@@ -213,6 +213,15 @@
             },
             {
               "Action": [
+                "s3:ListBucket"
+              ],
+              "Resource": [
+                "arn:aws:s3:::acorvin-40-40-20-tracker"
+              ],
+              "Effect": "Allow"
+            },
+            {
+              "Action": [
                 "ssm:GetParameter"
               ],
               "Resource": [
