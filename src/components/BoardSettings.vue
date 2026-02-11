@@ -44,7 +44,7 @@
         <div
           v-for="team in teams"
           :key="team.boardId"
-          class="flex items-center justify-between py-3"
+          class="flex items-center justify-between py-3 px-3 rounded-md hover:bg-primary-50 even:bg-gray-50 transition-colors"
         >
           <div>
             <span class="font-medium text-gray-900">{{ team.displayName || team.boardName }}</span>
