@@ -1,0 +1,30 @@
+{
+  "prod": {
+    "awscloudformation": {
+      "AuthRoleName": "amplify-acorvin404020tracker-prod-8af93-authRole",
+      "UnauthRoleArn": "arn:aws:iam::585132637328:role/amplify-acorvin404020tracker-prod-8af93-unauthRole",
+      "AuthRoleArn": "arn:aws:iam::585132637328:role/amplify-acorvin404020tracker-prod-8af93-authRole",
+      "Region": "us-east-1",
+      "DeploymentBucketName": "amplify-acorvin404020tracker-prod-8af93-deployment",
+      "UnauthRoleName": "amplify-acorvin404020tracker-prod-8af93-unauthRole",
+      "StackName": "amplify-acorvin404020tracker-prod-8af93",
+      "StackId": "arn:aws:cloudformation:us-east-1:585132637328:stack/amplify-acorvin404020tracker-prod-8af93/9382e550-069c-11f1-95db-0affd8bf250b",
+      "AmplifyAppId": "de6sdtqi3igwx"
+    },
+    "categories": {
+      "function": {
+        "dataReader": {
+          "deploymentBucketName": "amplify-acorvin404020tracker-prod-8af93-deployment",
+          "s3Key": "amplify-builds/dataReader-4e6c512f2b5470544141-build.zip"
+        },
+        "jiraFetcher": {
+          "deploymentBucketName": "amplify-acorvin404020tracker-prod-8af93-deployment",
+          "s3Key": "amplify-builds/jiraFetcher-6632686a754673707238-build.zip"
+        }
+      },
+      "api": {
+        "allocationApi": {}
+      }
+    }
+  }
+}

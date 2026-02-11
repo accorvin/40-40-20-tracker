@@ -1,11 +1,11 @@
 [
   {
     "Action": ["s3:GetObject", "s3:PutObject"],
-    "Resource": ["arn:aws:s3:::40-40-20-tracker-*/*"]
+    "Resource": ["arn:aws:s3:::acorvin-40-40-20-tracker/*"]
   },
   {
     "Action": ["ssm:GetParameter"],
-    "Resource": ["arn:aws:ssm:us-east-1:*:parameter/40-40-20-tracker/*/jira-token"]
+    "Resource": ["arn:aws:ssm:us-east-1:*:parameter/jira-tracker-app/*/jira-token"]
   },
   {
     "Action": ["lambda:InvokeFunction"],

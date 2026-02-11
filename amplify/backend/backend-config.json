@@ -3,12 +3,18 @@
     "allocationApi": {
       "dependsOn": [
         {
-          "attributes": ["Name", "Arn"],
+          "attributes": [
+            "Name",
+            "Arn"
+          ],
           "category": "function",
           "resourceName": "jiraFetcher"
         },
         {
-          "attributes": ["Name", "Arn"],
+          "attributes": [
+            "Name",
+            "Arn"
+          ],
           "category": "function",
           "resourceName": "dataReader"
         }
@@ -18,29 +24,49 @@
     }
   },
   "function": {
-    "jiraFetcher": {
+    "dataReader": {
       "build": true,
       "providerPlugin": "awscloudformation",
       "service": "Lambda"
     },
-    "dataReader": {
+    "jiraFetcher": {
       "build": true,
       "providerPlugin": "awscloudformation",
       "service": "Lambda"
     }
   },
   "parameters": {
-    "AMPLIFY_function_jiraFetcher_deploymentBucketName": {
-      "usedBy": [{ "category": "function", "resourceName": "jiraFetcher" }]
-    },
-    "AMPLIFY_function_jiraFetcher_s3Key": {
-      "usedBy": [{ "category": "function", "resourceName": "jiraFetcher" }]
-    },
     "AMPLIFY_function_dataReader_deploymentBucketName": {
-      "usedBy": [{ "category": "function", "resourceName": "dataReader" }]
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "dataReader"
+        }
+      ]
     },
     "AMPLIFY_function_dataReader_s3Key": {
-      "usedBy": [{ "category": "function", "resourceName": "dataReader" }]
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "dataReader"
+        }
+      ]
+    },
+    "AMPLIFY_function_jiraFetcher_deploymentBucketName": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "jiraFetcher"
+        }
+      ]
+    },
+    "AMPLIFY_function_jiraFetcher_s3Key": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "jiraFetcher"
+        }
+      ]
     }
   }
 }

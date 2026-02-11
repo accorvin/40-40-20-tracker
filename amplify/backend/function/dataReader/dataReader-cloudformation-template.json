@@ -1,6 +1,6 @@
 {
   "AWSTemplateFormatVersion": "2010-09-09",
-  "Description": "Lambda function for reading cached sprint data from S3",
+  "Description": "{\"createdOn\":\"Mac\",\"createdBy\":\"Amplify\",\"createdWith\":\"14.2.3\",\"stackType\":\"function-Lambda\",\"metadata\":{\"whyContinueWithGen1\":\"Prefer not to answer\"}}",
   "Parameters": {
     "CloudWatchRule": {
       "Type": "String",
@@ -28,7 +28,9 @@
   "Conditions": {
     "ShouldNotCreateEnvResources": {
       "Fn::Equals": [
-        { "Ref": "env" },
+        {
+          "Ref": "env"
+        },
         "NONE"
       ]
     }
@@ -42,26 +44,54 @@
       },
       "Properties": {
         "Code": {
-          "S3Bucket": { "Ref": "deploymentBucketName" },
-          "S3Key": { "Ref": "s3Key" }
+          "S3Bucket": {
+            "Ref": "deploymentBucketName"
+          },
+          "S3Key": {
+            "Ref": "s3Key"
+          }
         },
         "Handler": "index.handler",
         "FunctionName": {
           "Fn::If": [
             "ShouldNotCreateEnvResources",
             "dataReader",
-            { "Fn::Join": ["", ["dataReader", "-", { "Ref": "env" }]] }
+            {
+              "Fn::Join": [
+                "",
+                [
+                  "dataReader",
+                  "-",
+                  {
+                    "Ref": "env"
+                  }
+                ]
+              ]
+            }
           ]
         },
         "Environment": {
           "Variables": {
-            "ENV": { "Ref": "env" },
-            "REGION": { "Ref": "AWS::Region" },
-            "S3_BUCKET": { "Ref": "s3Bucket" },
-            "FIREBASE_PROJECT_ID": { "Ref": "firebaseProjectId" }
+            "ENV": {
+              "Ref": "env"
+            },
+            "REGION": {
+              "Ref": "AWS::Region"
+            },
+            "S3_BUCKET": {
+              "Ref": "s3Bucket"
+            },
+            "FIREBASE_PROJECT_ID": {
+              "Ref": "firebaseProjectId"
+            }
           }
         },
-        "Role": { "Fn::GetAtt": ["LambdaExecutionRole", "Arn"] },
+        "Role": {
+          "Fn::GetAtt": [
+            "LambdaExecutionRole",
+            "Arn"
+          ]
+        },
         "Runtime": "nodejs18.x",
         "Layers": [],
         "Timeout": 25
@@ -74,7 +104,18 @@
           "Fn::If": [
             "ShouldNotCreateEnvResources",
             "4040trackerReaderRole",
-            { "Fn::Join": ["", ["4040trackerReaderRole", "-", { "Ref": "env" }]] }
+            {
+              "Fn::Join": [
+                "",
+                [
+                  "4040trackerReaderRole",
+                  "-",
+                  {
+                    "Ref": "env"
+                  }
+                ]
+              ]
+            }
           ]
         },
         "AssumeRolePolicyDocument": {
@@ -82,19 +123,31 @@
           "Statement": [
             {
               "Effect": "Allow",
-              "Principal": { "Service": ["lambda.amazonaws.com"] },
-              "Action": ["sts:AssumeRole"]
+              "Principal": {
+                "Service": [
+                  "lambda.amazonaws.com"
+                ]
+              },
+              "Action": [
+                "sts:AssumeRole"
+              ]
             }
           ]
         }
       }
     },
     "lambdaexecutionpolicy": {
-      "DependsOn": ["LambdaExecutionRole"],
+      "DependsOn": [
+        "LambdaExecutionRole"
+      ],
       "Type": "AWS::IAM::Policy",
       "Properties": {
         "PolicyName": "lambda-execution-policy",
-        "Roles": [{ "Ref": "LambdaExecutionRole" }],
+        "Roles": [
+          {
+            "Ref": "LambdaExecutionRole"
+          }
+        ],
         "PolicyDocument": {
           "Version": "2012-10-17",
           "Statement": [
@@ -109,9 +162,15 @@
                 "Fn::Sub": [
                   "arn:aws:logs:${region}:${account}:log-group:/aws/lambda/${lambda}:log-stream:*",
                   {
-                    "region": { "Ref": "AWS::Region" },
-                    "account": { "Ref": "AWS::AccountId" },
-                    "lambda": { "Ref": "LambdaFunction" }
+                    "region": {
+                      "Ref": "AWS::Region"
+                    },
+                    "account": {
+                      "Ref": "AWS::AccountId"
+                    },
+                    "lambda": {
+                      "Ref": "LambdaFunction"
+                    }
                   }
                 ]
               }
@@ -128,22 +187,57 @@
           "Version": "2012-10-17",
           "Statement": [
             {
-              "Action": ["s3:GetObject", "s3:PutObject"],
-              "Resource": ["arn:aws:s3:::40-40-20-tracker-*/*"],
+              "Action": [
+                "s3:GetObject",
+                "s3:PutObject"
+              ],
+              "Resource": [
+                "arn:aws:s3:::acorvin-40-40-20-tracker/*"
+              ],
               "Effect": "Allow"
             }
           ]
         },
-        "Roles": [{ "Ref": "LambdaExecutionRole" }]
+        "Roles": [
+          {
+            "Ref": "LambdaExecutionRole"
+          }
+        ]
       },
       "DependsOn": "LambdaExecutionRole"
     }
   },
   "Outputs": {
-    "Name": { "Value": { "Ref": "LambdaFunction" } },
-    "Arn": { "Value": { "Fn::GetAtt": ["LambdaFunction", "Arn"] } },
-    "Region": { "Value": { "Ref": "AWS::Region" } },
-    "LambdaExecutionRole": { "Value": { "Ref": "LambdaExecutionRole" } },
-    "LambdaExecutionRoleArn": { "Value": { "Fn::GetAtt": ["LambdaExecutionRole", "Arn"] } }
+    "Name": {
+      "Value": {
+        "Ref": "LambdaFunction"
+      }
+    },
+    "Arn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "LambdaFunction",
+          "Arn"
+        ]
+      }
+    },
+    "Region": {
+      "Value": {
+        "Ref": "AWS::Region"
+      }
+    },
+    "LambdaExecutionRole": {
+      "Value": {
+        "Ref": "LambdaExecutionRole"
+      }
+    },
+    "LambdaExecutionRoleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "LambdaExecutionRole",
+          "Arn"
+        ]
+      }
+    }
   }
 }
