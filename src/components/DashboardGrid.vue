@@ -15,18 +15,22 @@
     </div>
 
     <template v-else>
-      <div data-testid="allocation-legend" class="flex items-center gap-4 mb-4 text-sm text-gray-600">
+      <div data-testid="allocation-legend" class="flex items-center gap-4 mb-4 text-sm text-gray-600 flex-wrap">
         <span class="flex items-center gap-1.5">
           <span class="inline-block w-3 h-3 rounded-sm bg-amber-400"></span>
-          Bugs & Tech Debt (40%)
+          Tech Debt & Quality (40%)
         </span>
         <span class="flex items-center gap-1.5">
           <span class="inline-block w-3 h-3 rounded-sm bg-blue-400"></span>
-          Feature Work (40%)
+          New Features (40%)
         </span>
         <span class="flex items-center gap-1.5">
           <span class="inline-block w-3 h-3 rounded-sm bg-green-400"></span>
-          Learning (20%)
+          Learning & Enablement (20%)
+        </span>
+        <span class="flex items-center gap-1.5">
+          <span class="inline-block w-3 h-3 rounded-sm bg-gray-400"></span>
+          Uncategorized
         </span>
       </div>
 

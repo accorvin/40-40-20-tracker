@@ -64,7 +64,7 @@
       </div>
 
       <!-- Bucket breakdown grid -->
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
         <BucketBreakdown
           v-for="bucket in bucketConfigs"
           :key="bucket.key"
@@ -108,9 +108,10 @@ const props = defineProps({
 defineEmits(['select-sprint', 'back'])
 
 const bucketConfigs = [
-  { key: 'bugs-tech-debt', name: 'Bugs & Tech Debt', target: 40, color: 'amber' },
-  { key: 'feature-work', name: 'Feature Work', target: 40, color: 'blue' },
-  { key: 'learning', name: 'Learning', target: 20, color: 'green' }
+  { key: 'tech-debt-quality', name: 'Tech Debt & Quality', target: 40, color: 'amber' },
+  { key: 'new-features', name: 'New Features', target: 40, color: 'blue' },
+  { key: 'learning-enablement', name: 'Learning & Enablement', target: 20, color: 'green' },
+  { key: 'uncategorized', name: 'Uncategorized', target: 0, color: 'gray' }
 ]
 
 function getBucketData(key) {

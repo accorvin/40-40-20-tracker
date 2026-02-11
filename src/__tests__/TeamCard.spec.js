@@ -27,9 +27,10 @@ describe('TeamCard', () => {
       estimatedIssueCount: 10,
       unestimatedIssueCount: 3,
       buckets: {
-        'bugs-tech-debt': { points: 20, issueCount: 4, completedPoints: 10 },
-        'feature-work': { points: 25, issueCount: 6, completedPoints: 10 },
-        'learning': { points: 0, issueCount: 0, completedPoints: 0 }
+        'tech-debt-quality': { points: 20, issueCount: 4, completedPoints: 10 },
+        'new-features': { points: 25, issueCount: 6, completedPoints: 10 },
+        'learning-enablement': { points: 0, issueCount: 0, completedPoints: 0 },
+        'uncategorized': { points: 0, issueCount: 0, completedPoints: 0 }
       }
     }
   }
@@ -124,9 +125,10 @@ describe('TeamCard', () => {
         estimatedIssueCount: 10,
         unestimatedIssueCount: 0,
         buckets: {
-          'bugs-tech-debt': { points: 20, issueCount: 4, completedPoints: 16 },
-          'feature-work': { points: 30, issueCount: 6, completedPoints: 24 },
-          'learning': { points: 0, issueCount: 0, completedPoints: 0 }
+          'tech-debt-quality': { points: 20, issueCount: 4, completedPoints: 16 },
+          'new-features': { points: 30, issueCount: 6, completedPoints: 24 },
+          'learning-enablement': { points: 0, issueCount: 0, completedPoints: 0 },
+          'uncategorized': { points: 0, issueCount: 0, completedPoints: 0 }
         }
       }
     }

@@ -43,7 +43,8 @@ const borderClass = computed(() => {
   const map = {
     amber: 'border-l-amber-400',
     blue: 'border-l-blue-400',
-    green: 'border-l-green-400'
+    green: 'border-l-green-400',
+    gray: 'border-l-gray-400'
   }
   return map[props.color] || 'border-l-gray-400'
 })

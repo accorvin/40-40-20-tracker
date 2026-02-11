@@ -7,15 +7,19 @@ import AllocationBar from '../components/AllocationBar.vue'
 
 describe('AllocationBar', () => {
   const mockBuckets = {
-    'bugs-tech-debt': {
+    'tech-debt-quality': {
       points: 40,
       count: 5
     },
-    'feature-work': {
+    'new-features': {
       points: 50,
       count: 8
     },
-    'learning': {
+    'learning-enablement': {
+      points: 0,
+      count: 0
+    },
+    'uncategorized': {
       points: 0,
       count: 0
     }
@@ -26,13 +30,13 @@ describe('AllocationBar', () => {
       props: { buckets: mockBuckets, totalPoints: 90 }
     })
 
-    // bugs-tech-debt: 40/90 ≈ 44%
-    const bugsSegment = wrapper.find('[data-testid="segment-bugs-tech-debt"]')
-    expect(bugsSegment.exists()).toBe(true)
-    expect(bugsSegment.attributes('style')).toContain('width: 44%')
+    // tech-debt-quality: 40/90 ≈ 44%
+    const techDebtSegment = wrapper.find('[data-testid="segment-tech-debt-quality"]')
+    expect(techDebtSegment.exists()).toBe(true)
+    expect(techDebtSegment.attributes('style')).toContain('width: 44%')
 
-    // feature-work: 50/90 ≈ 56%
-    const featureSegment = wrapper.find('[data-testid="segment-feature-work"]')
+    // new-features: 50/90 ≈ 56%
+    const featureSegment = wrapper.find('[data-testid="segment-new-features"]')
     expect(featureSegment.exists()).toBe(true)
     expect(featureSegment.attributes('style')).toContain('width: 56%')
   })
@@ -49,9 +53,10 @@ describe('AllocationBar', () => {
 
   it('hides percentage labels on segments < 10%', () => {
     const smallBuckets = {
-      'bugs-tech-debt': { points: 5, count: 1 },
-      'feature-work': { points: 90, count: 10 },
-      'learning': { points: 5, count: 1 }
+      'tech-debt-quality': { points: 5, count: 1 },
+      'new-features': { points: 90, count: 10 },
+      'learning-enablement': { points: 5, count: 1 },
+      'uncategorized': { points: 0, count: 0 }
     }
 
     const wrapper = mount(AllocationBar, {
@@ -59,15 +64,16 @@ describe('AllocationBar', () => {
     })
 
     // 5% segments should not show labels
-    const bugsSegment = wrapper.find('[data-testid="segment-bugs-tech-debt"]')
-    expect(bugsSegment.text()).toBe('')
+    const techDebtSegment = wrapper.find('[data-testid="segment-tech-debt-quality"]')
+    expect(techDebtSegment.text()).toBe('')
   })
 
   it('handles 0 total points gracefully', () => {
     const zeroBuckets = {
-      'bugs-tech-debt': { points: 0, count: 0 },
-      'feature-work': { points: 0, count: 0 },
-      'learning': { points: 0, count: 0 }
+      'tech-debt-quality': { points: 0, count: 0 },
+      'new-features': { points: 0, count: 0 },
+      'learning-enablement': { points: 0, count: 0 },
+      'uncategorized': { points: 0, count: 0 }
     }
 
     const wrapper = mount(AllocationBar, {
@@ -91,25 +97,26 @@ describe('AllocationBar', () => {
       props: { buckets: mockBuckets, totalPoints: 90 }
     })
 
-    const bugsSegment = wrapper.find('[data-testid="segment-bugs-tech-debt"]')
-    expect(bugsSegment.attributes('title')).toBe('Bugs & Tech Debt: 40 pts (44%)')
+    const techDebtSegment = wrapper.find('[data-testid="segment-tech-debt-quality"]')
+    expect(techDebtSegment.attributes('title')).toBe('Tech Debt & Quality: 40 pts (44%)')
 
-    const featureSegment = wrapper.find('[data-testid="segment-feature-work"]')
-    expect(featureSegment.attributes('title')).toBe('Feature Work: 50 pts (56%)')
+    const featureSegment = wrapper.find('[data-testid="segment-new-features"]')
+    expect(featureSegment.attributes('title')).toBe('New Features: 50 pts (56%)')
   })
 
   it('shows tooltip for learning segment when present', () => {
     const withLearning = {
-      'bugs-tech-debt': { points: 40, count: 5 },
-      'feature-work': { points: 40, count: 5 },
-      'learning': { points: 20, count: 3 }
+      'tech-debt-quality': { points: 40, count: 5 },
+      'new-features': { points: 40, count: 5 },
+      'learning-enablement': { points: 20, count: 3 },
+      'uncategorized': { points: 0, count: 0 }
     }
 
     const wrapper = mount(AllocationBar, {
       props: { buckets: withLearning, totalPoints: 100 }
     })
 
-    const learningSegment = wrapper.find('[data-testid="segment-learning"]')
-    expect(learningSegment.attributes('title')).toBe('Learning: 20 pts (20%)')
+    const learningSegment = wrapper.find('[data-testid="segment-learning-enablement"]')
+    expect(learningSegment.attributes('title')).toBe('Learning & Enablement: 20 pts (20%)')
   })
 })

@@ -56,9 +56,10 @@ describe('App', () => {
           estimatedIssueCount: 10,
           unestimatedIssueCount: 3,
           buckets: {
-            'bugs-tech-debt': { points: 20, issueCount: 4, completedPoints: 10 },
-            'feature-work': { points: 25, issueCount: 6, completedPoints: 10 },
-            'learning': { points: 0, issueCount: 0, completedPoints: 0 }
+            'tech-debt-quality': { points: 20, issueCount: 4, completedPoints: 10 },
+            'new-features': { points: 25, issueCount: 6, completedPoints: 10 },
+            'learning-enablement': { points: 0, issueCount: 0, completedPoints: 0 },
+            'uncategorized': { points: 0, issueCount: 0, completedPoints: 0 }
           }
         }
       },
@@ -69,9 +70,10 @@ describe('App', () => {
           estimatedIssueCount: 8,
           unestimatedIssueCount: 1,
           buckets: {
-            'bugs-tech-debt': { points: 15, issueCount: 3, completedPoints: 5 },
-            'feature-work': { points: 15, issueCount: 5, completedPoints: 5 },
-            'learning': { points: 0, issueCount: 0, completedPoints: 0 }
+            'tech-debt-quality': { points: 15, issueCount: 3, completedPoints: 5 },
+            'new-features': { points: 15, issueCount: 5, completedPoints: 5 },
+            'learning-enablement': { points: 0, issueCount: 0, completedPoints: 0 },
+            'uncategorized': { points: 0, issueCount: 0, completedPoints: 0 }
           }
         }
       }
@@ -100,14 +102,15 @@ describe('App', () => {
       estimatedIssueCount: 10,
       unestimatedIssueCount: 1,
       buckets: {
-        'bugs-tech-debt': { points: 20, issueCount: 4, completedPoints: 10 },
-        'feature-work': { points: 25, issueCount: 6, completedPoints: 10 },
-        'learning': { points: 0, issueCount: 0, completedPoints: 0 }
+        'tech-debt-quality': { points: 20, issueCount: 4, completedPoints: 10 },
+        'new-features': { points: 25, issueCount: 6, completedPoints: 10 },
+        'learning-enablement': { points: 0, issueCount: 0, completedPoints: 0 },
+        'uncategorized': { points: 0, issueCount: 0, completedPoints: 0 }
       }
     },
     issues: [
-      { key: 'RHOAIENG-1', summary: 'Fix bug', url: 'https://issues.redhat.com/browse/RHOAIENG-1', storyPoints: 5, status: 'Done', completed: true, bucket: 'bugs-tech-debt' },
-      { key: 'RHOAIENG-2', summary: 'Feature', url: 'https://issues.redhat.com/browse/RHOAIENG-2', storyPoints: 8, status: 'In Progress', completed: false, bucket: 'feature-work' }
+      { key: 'RHOAIENG-1', summary: 'Fix bug', url: 'https://issues.redhat.com/browse/RHOAIENG-1', storyPoints: 5, status: 'Done', completed: true, bucket: 'tech-debt-quality' },
+      { key: 'RHOAIENG-2', summary: 'Feature', url: 'https://issues.redhat.com/browse/RHOAIENG-2', storyPoints: 8, status: 'In Progress', completed: false, bucket: 'new-features' }
     ]
   }
 

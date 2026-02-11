@@ -49,9 +49,10 @@ const completionPercent = computed(() => {
 })
 
 const bucketLabels = {
-  'bugs-tech-debt': 'Bugs & Tech Debt',
-  'feature-work': 'Feature Work',
-  'learning': 'Learning'
+  'tech-debt-quality': 'Tech Debt & Quality',
+  'new-features': 'New Features',
+  'learning-enablement': 'Learning & Enablement',
+  'uncategorized': 'Uncategorized'
 }
 
 const visibleBuckets = computed(() => {

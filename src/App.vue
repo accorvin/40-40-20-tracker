@@ -318,7 +318,7 @@ export default {
 
     transformSprintData(data) {
       // Group flat issues array by bucket
-      const issuesByBucket = { 'bugs-tech-debt': [], 'feature-work': [], 'learning': [] }
+      const issuesByBucket = { 'tech-debt-quality': [], 'new-features': [], 'learning-enablement': [], 'uncategorized': [] }
       for (const issue of (data.issues || [])) {
         const bucket = issuesByBucket[issue.bucket]
         if (bucket) bucket.push(issue)

@@ -168,7 +168,7 @@ async function fetchSprintIssues(sprintId) {
 
   while (startAt < total) {
     const data = await jiraRequest(
-      `/rest/agile/1.0/sprint/${sprintId}/issue?startAt=${startAt}&maxResults=${maxResults}&fields=summary,issuetype,status,assignee,customfield_12310243,resolution,resolutiondate`
+      `/rest/agile/1.0/sprint/${sprintId}/issue?startAt=${startAt}&maxResults=${maxResults}&fields=summary,issuetype,status,assignee,customfield_12310243,customfield_12320040,resolution,resolutiondate`
     );
 
     total = data.total;
@@ -183,6 +183,7 @@ async function fetchSprintIssues(sprintId) {
         status: issue.fields.status?.name || null,
         assignee: issue.fields.assignee?.displayName || null,
         storyPoints: storyPoints,
+        activityType: issue.fields.customfield_12320040?.value || null,
         resolution: issue.fields.resolution?.name || null,
         resolutionDate: issue.fields.resolutiondate || null,
         url: `${JIRA_HOST}/browse/${issue.key}`
@@ -196,55 +197,19 @@ async function fetchSprintIssues(sprintId) {
 }
 
 /**
- * Fetch all issue keys that are feature work.
- *
- * Uses JQL: Stories/Tasks in RHOAIENG that are children of Epics
- * that are children of Features in RHAISTRAT.
+ * Classify an issue into a 40-40-20 bucket based on Activity Type custom field
  */
-async function fetchFeatureWorkKeys() {
-  const featureKeys = new Set();
-  let startAt = 0;
-  const maxResults = 100;
-  let total = Infinity;
-
-  const jql = encodeURIComponent(
-    'issueFunction in linkedIssuesOf(' +
-    '"project = RHOAIENG AND issuetype = Epic AND issueFunction in linkedIssuesOf(' +
-    '\'project = RHAISTRAT AND issuetype = Feature\', \'is parent of\')", ' +
-    '"is epic of")'
-  );
-
-  while (startAt < total) {
-    const data = await jiraRequest(
-      `/rest/api/2/search?jql=${jql}&startAt=${startAt}&maxResults=${maxResults}&fields=key`
-    );
-
-    total = data.total;
-    data.issues.forEach(issue => featureKeys.add(issue.key));
-    startAt += maxResults;
+function classifyIssue(issue) {
+  switch (issue.activityType) {
+    case 'Tech Debt & Quality':
+      return 'tech-debt-quality';
+    case 'New Features':
+      return 'new-features';
+    case 'Learning & Enablement':
+      return 'learning-enablement';
+    default:
+      return 'uncategorized';
   }
-
-  console.log(`Found ${featureKeys.size} feature work issue keys`);
-  return featureKeys;
-}
-
-/**
- * Classify an issue into a 40-40-20 bucket
- */
-function classifyIssue(issue, featureWorkKeys) {
-  // Bugs always go to bugs-tech-debt
-  if (issue.issueType === 'Bug') {
-    return 'bugs-tech-debt';
-  }
-
-  // Stories/Tasks that are children of feature epics
-  if (featureWorkKeys.has(issue.key)) {
-    return 'feature-work';
-  }
-
-  // Everything else defaults to bugs-tech-debt
-  // (Learning bucket excluded for now)
-  return 'bugs-tech-debt';
 }
 
 /**
@@ -316,9 +281,10 @@ function determineStaleness(sprints, now = new Date()) {
  */
 function buildSprintSummary(issues) {
   const buckets = {
-    'bugs-tech-debt': { points: 0, issueCount: 0, completedPoints: 0 },
-    'feature-work': { points: 0, issueCount: 0, completedPoints: 0 },
-    'learning': { points: 0, issueCount: 0, completedPoints: 0 }
+    'tech-debt-quality': { points: 0, issueCount: 0, completedPoints: 0 },
+    'new-features': { points: 0, issueCount: 0, completedPoints: 0 },
+    'learning-enablement': { points: 0, issueCount: 0, completedPoints: 0 },
+    'uncategorized': { points: 0, issueCount: 0, completedPoints: 0 }
   };
 
   let totalPoints = 0;
@@ -517,17 +483,7 @@ async function performRefresh({ projectKey, hardRefresh }) {
     }
   }
 
-  // Step 2: Fetch feature work keys for classification
-  console.log('Fetching feature work keys...');
-  let featureWorkKeys;
-  try {
-    featureWorkKeys = await fetchFeatureWorkKeys();
-  } catch (error) {
-    console.warn('Failed to fetch feature work keys, all issues will default to bugs-tech-debt:', error.message);
-    featureWorkKeys = new Set();
-  }
-
-  // Step 3: Process boards in parallel (concurrency of 5)
+  // Step 2: Process boards in parallel (concurrency of 5)
   const CONCURRENCY = 5;
   const boardResults = [];
 
@@ -573,13 +529,13 @@ async function performRefresh({ projectKey, hardRefresh }) {
 
         const classifiedIssues = rawIssues.map(issue => ({
           ...issue,
-          bucket: classifyIssue(issue, featureWorkKeys),
+          bucket: classifyIssue(issue),
           completed: issue.resolution != null
         }));
 
         const summary = buildSprintSummary(classifiedIssues);
 
-        console.log(`    ${classifiedIssues.length} issues, ${summary.totalPoints} pts | bugs-tech-debt: ${summary.buckets['bugs-tech-debt'].points} pts, feature-work: ${summary.buckets['feature-work'].points} pts | ${summary.unestimatedIssueCount} unestimated`);
+        console.log(`    ${classifiedIssues.length} issues, ${summary.totalPoints} pts | tech-debt: ${summary.buckets['tech-debt-quality'].points} pts, features: ${summary.buckets['new-features'].points} pts, learning: ${summary.buckets['learning-enablement'].points} pts, uncategorized: ${summary.buckets['uncategorized'].points} pts | ${summary.unestimatedIssueCount} unestimated`);
 
         const sprintData = {
           sprintId: sprint.id,
@@ -638,13 +594,13 @@ async function performRefresh({ projectKey, hardRefresh }) {
     boardResults.push(...chunkResults);
   }
 
-  // Step 4: Upload boards index
+  // Step 3: Upload boards index
   await uploadToS3('boards.json', {
     lastUpdated: new Date().toISOString(),
     boards: allBoards
   });
 
-  // Step 5: Upload teams config if it doesn't exist
+  // Step 4: Upload teams config if it doesn't exist
   const existingTeams = await readFromS3('teams.json');
   if (!existingTeams) {
     await uploadToS3('teams.json', {
@@ -657,7 +613,7 @@ async function performRefresh({ projectKey, hardRefresh }) {
     });
   }
 
-  // Step 6: Generate dashboard-summary.json
+  // Step 5: Generate dashboard-summary.json
   const dashboardSummary = {
     lastUpdated: new Date().toISOString(),
     boards: {}
@@ -682,14 +638,13 @@ async function performRefresh({ projectKey, hardRefresh }) {
 
   const allSprintResults = boardResults.flatMap(r => r.sprintResults);
   const refreshElapsed = ((Date.now() - refreshStart) / 1000).toFixed(1);
-  console.log(`Refresh complete: ${boards.length} boards, ${allSprintResults.length} sprints, ${featureWorkKeys.size} feature keys (${refreshElapsed}s)`);
+  console.log(`Refresh complete: ${boards.length} boards, ${allSprintResults.length} sprints (${refreshElapsed}s)`);
 
   return {
     success: true,
     projectKey,
     boardCount: boards.length,
-    sprintCount: allSprintResults.length,
-    featureWorkKeysFound: featureWorkKeys.size
+    sprintCount: allSprintResults.length
   };
 }
 

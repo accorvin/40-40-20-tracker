@@ -8,8 +8,8 @@ import IssueList from '../components/IssueList.vue'
 
 describe('BucketBreakdown', () => {
   const defaultProps = {
-    name: 'Bugs & Tech Debt',
-    bucketKey: 'bugs-tech-debt',
+    name: 'Tech Debt & Quality',
+    bucketKey: 'tech-debt-quality',
     points: 20,
     percentage: 44,
     targetPercentage: 40,
@@ -37,7 +37,7 @@ describe('BucketBreakdown', () => {
 
   it('renders bucket name', () => {
     const wrapper = mount(BucketBreakdown, { props: defaultProps })
-    expect(wrapper.text()).toContain('Bugs & Tech Debt')
+    expect(wrapper.text()).toContain('Tech Debt & Quality')
   })
 
   it('shows points and percentage', () => {
@@ -58,20 +58,28 @@ describe('BucketBreakdown', () => {
     expect(card.classes()).toContain('border-l-amber-400')
   })
 
-  it('renders blue border for feature-work', () => {
+  it('renders blue border for new-features', () => {
     const wrapper = mount(BucketBreakdown, {
-      props: { ...defaultProps, color: 'blue', name: 'Feature Work', bucketKey: 'feature-work' }
+      props: { ...defaultProps, color: 'blue', name: 'New Features', bucketKey: 'new-features' }
     })
     const card = wrapper.find('[data-testid="bucket-card"]')
     expect(card.classes()).toContain('border-l-blue-400')
   })
 
-  it('renders green border for learning', () => {
+  it('renders green border for learning-enablement', () => {
     const wrapper = mount(BucketBreakdown, {
-      props: { ...defaultProps, color: 'green', name: 'Learning', bucketKey: 'learning' }
+      props: { ...defaultProps, color: 'green', name: 'Learning & Enablement', bucketKey: 'learning-enablement' }
     })
     const card = wrapper.find('[data-testid="bucket-card"]')
     expect(card.classes()).toContain('border-l-green-400')
+  })
+
+  it('renders gray border for uncategorized', () => {
+    const wrapper = mount(BucketBreakdown, {
+      props: { ...defaultProps, color: 'gray', name: 'Uncategorized', bucketKey: 'uncategorized' }
+    })
+    const card = wrapper.find('[data-testid="bucket-card"]')
+    expect(card.classes()).toContain('border-l-gray-400')
   })
 
   it('shows "over" variance when percentage exceeds target by more than 5', () => {

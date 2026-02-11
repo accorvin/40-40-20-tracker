@@ -34,26 +34,28 @@ describe('TeamDetail', () => {
       estimatedIssueCount: 8,
       unestimatedIssueCount: 2,
       buckets: {
-        'bugs-tech-debt': { points: 20, percentage: 40, issueCount: 3, completedPoints: 10 },
-        'feature-work': { points: 25, percentage: 50, issueCount: 4, completedPoints: 10 },
-        'learning': { points: 5, percentage: 10, issueCount: 1, completedPoints: 0 }
+        'tech-debt-quality': { points: 20, percentage: 40, issueCount: 3, completedPoints: 10 },
+        'new-features': { points: 25, percentage: 50, issueCount: 4, completedPoints: 10 },
+        'learning-enablement': { points: 5, percentage: 10, issueCount: 1, completedPoints: 0 },
+        'uncategorized': { points: 0, percentage: 0, issueCount: 0, completedPoints: 0 }
       }
     },
     issues: {
-      'bugs-tech-debt': [
+      'tech-debt-quality': [
         { key: 'RHOAIENG-1', summary: 'Bug fix 1', url: 'https://issues.redhat.com/browse/RHOAIENG-1', storyPoints: 5, status: 'Done', completed: true },
         { key: 'RHOAIENG-2', summary: 'Bug fix 2', url: 'https://issues.redhat.com/browse/RHOAIENG-2', storyPoints: 8, status: 'In Progress', completed: false },
         { key: 'RHOAIENG-3', summary: 'Tech debt item', url: 'https://issues.redhat.com/browse/RHOAIENG-3', storyPoints: null, status: 'To Do', completed: false }
       ],
-      'feature-work': [
+      'new-features': [
         { key: 'RHOAIENG-4', summary: 'Feature task', url: 'https://issues.redhat.com/browse/RHOAIENG-4', storyPoints: 13, status: 'In Progress', completed: false },
         { key: 'RHOAIENG-5', summary: 'Another feature', url: 'https://issues.redhat.com/browse/RHOAIENG-5', storyPoints: 8, status: 'Done', completed: true },
         { key: 'RHOAIENG-6', summary: 'More feature work', url: 'https://issues.redhat.com/browse/RHOAIENG-6', storyPoints: 4, status: 'To Do', completed: false },
         { key: 'RHOAIENG-7', summary: 'Unestimated feature', url: 'https://issues.redhat.com/browse/RHOAIENG-7', storyPoints: null, status: 'To Do', completed: false }
       ],
-      'learning': [
+      'learning-enablement': [
         { key: 'RHOAIENG-8', summary: 'Learning item', url: 'https://issues.redhat.com/browse/RHOAIENG-8', storyPoints: 5, status: 'In Progress', completed: false }
-      ]
+      ],
+      'uncategorized': []
     }
   }
 
@@ -124,31 +126,36 @@ describe('TeamDetail', () => {
     expect(wrapper.text()).toContain('total points')
   })
 
-  it('renders 3 BucketBreakdown cards', () => {
+  it('renders 4 BucketBreakdown cards', () => {
     const wrapper = mount(TeamDetail, { props: defaultProps })
     const cards = wrapper.findAllComponents(BucketBreakdown)
-    expect(cards.length).toBe(3)
+    expect(cards.length).toBe(4)
   })
 
   it('passes correct props to BucketBreakdown cards', () => {
     const wrapper = mount(TeamDetail, { props: defaultProps })
     const cards = wrapper.findAllComponents(BucketBreakdown)
 
-    const bugsCard = cards.find(c => c.props('bucketKey') === 'bugs-tech-debt')
-    expect(bugsCard.props('name')).toBe('Bugs & Tech Debt')
-    expect(bugsCard.props('points')).toBe(20)
-    expect(bugsCard.props('targetPercentage')).toBe(40)
-    expect(bugsCard.props('color')).toBe('amber')
+    const techDebtCard = cards.find(c => c.props('bucketKey') === 'tech-debt-quality')
+    expect(techDebtCard.props('name')).toBe('Tech Debt & Quality')
+    expect(techDebtCard.props('points')).toBe(20)
+    expect(techDebtCard.props('targetPercentage')).toBe(40)
+    expect(techDebtCard.props('color')).toBe('amber')
 
-    const featureCard = cards.find(c => c.props('bucketKey') === 'feature-work')
-    expect(featureCard.props('name')).toBe('Feature Work')
+    const featureCard = cards.find(c => c.props('bucketKey') === 'new-features')
+    expect(featureCard.props('name')).toBe('New Features')
     expect(featureCard.props('targetPercentage')).toBe(40)
     expect(featureCard.props('color')).toBe('blue')
 
-    const learningCard = cards.find(c => c.props('bucketKey') === 'learning')
-    expect(learningCard.props('name')).toBe('Learning')
+    const learningCard = cards.find(c => c.props('bucketKey') === 'learning-enablement')
+    expect(learningCard.props('name')).toBe('Learning & Enablement')
     expect(learningCard.props('targetPercentage')).toBe(20)
     expect(learningCard.props('color')).toBe('green')
+
+    const uncategorizedCard = cards.find(c => c.props('bucketKey') === 'uncategorized')
+    expect(uncategorizedCard.props('name')).toBe('Uncategorized')
+    expect(uncategorizedCard.props('targetPercentage')).toBe(0)
+    expect(uncategorizedCard.props('color')).toBe('gray')
   })
 
   it('renders UnestimatedPanel with unestimated issues', () => {

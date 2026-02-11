@@ -5,31 +5,40 @@
     </div>
     <div v-else class="relative h-6 rounded overflow-hidden flex">
       <div
-        v-if="bugsPercent > 0"
-        data-testid="segment-bugs-tech-debt"
+        v-if="techDebtPercent > 0"
+        data-testid="segment-tech-debt-quality"
         class="bg-amber-400 h-full flex items-center justify-center text-xs font-medium text-amber-900 cursor-default"
-        :style="{ width: bugsPercent + '%' }"
-        :title="`Bugs & Tech Debt: ${buckets['bugs-tech-debt']?.points || 0} pts (${bugsPercent}%)`"
+        :style="{ width: techDebtPercent + '%' }"
+        :title="`Tech Debt & Quality: ${buckets['tech-debt-quality']?.points || 0} pts (${techDebtPercent}%)`"
       >
-        <span v-if="bugsPercent >= 10">{{ bugsPercent }}%</span>
+        <span v-if="techDebtPercent >= 10">{{ techDebtPercent }}%</span>
       </div>
       <div
         v-if="featurePercent > 0"
-        data-testid="segment-feature-work"
+        data-testid="segment-new-features"
         class="bg-blue-400 h-full flex items-center justify-center text-xs font-medium text-blue-900 cursor-default"
         :style="{ width: featurePercent + '%' }"
-        :title="`Feature Work: ${buckets['feature-work']?.points || 0} pts (${featurePercent}%)`"
+        :title="`New Features: ${buckets['new-features']?.points || 0} pts (${featurePercent}%)`"
       >
         <span v-if="featurePercent >= 10">{{ featurePercent }}%</span>
       </div>
       <div
         v-if="learningPercent > 0"
-        data-testid="segment-learning"
+        data-testid="segment-learning-enablement"
         class="bg-green-400 h-full flex items-center justify-center text-xs font-medium text-green-900 cursor-default"
         :style="{ width: learningPercent + '%' }"
-        :title="`Learning: ${buckets['learning']?.points || 0} pts (${learningPercent}%)`"
+        :title="`Learning & Enablement: ${buckets['learning-enablement']?.points || 0} pts (${learningPercent}%)`"
       >
         <span v-if="learningPercent >= 10">{{ learningPercent }}%</span>
+      </div>
+      <div
+        v-if="uncategorizedPercent > 0"
+        data-testid="segment-uncategorized"
+        class="bg-gray-400 h-full flex items-center justify-center text-xs font-medium text-gray-900 cursor-default"
+        :style="{ width: uncategorizedPercent + '%' }"
+        :title="`Uncategorized: ${buckets['uncategorized']?.points || 0} pts (${uncategorizedPercent}%)`"
+      >
+        <span v-if="uncategorizedPercent >= 10">{{ uncategorizedPercent }}%</span>
       </div>
 
       <!-- Target marker lines at 40% and 80% -->
@@ -61,18 +70,23 @@ const props = defineProps({
   }
 })
 
-const bugsPercent = computed(() => {
+const techDebtPercent = computed(() => {
   if (props.totalPoints === 0) return 0
-  return Math.round((props.buckets['bugs-tech-debt']?.points || 0) / props.totalPoints * 100)
+  return Math.round((props.buckets['tech-debt-quality']?.points || 0) / props.totalPoints * 100)
 })
 
 const featurePercent = computed(() => {
   if (props.totalPoints === 0) return 0
-  return Math.round((props.buckets['feature-work']?.points || 0) / props.totalPoints * 100)
+  return Math.round((props.buckets['new-features']?.points || 0) / props.totalPoints * 100)
 })
 
 const learningPercent = computed(() => {
   if (props.totalPoints === 0) return 0
-  return Math.round((props.buckets['learning']?.points || 0) / props.totalPoints * 100)
+  return Math.round((props.buckets['learning-enablement']?.points || 0) / props.totalPoints * 100)
+})
+
+const uncategorizedPercent = computed(() => {
+  if (props.totalPoints === 0) return 0
+  return Math.round((props.buckets['uncategorized']?.points || 0) / props.totalPoints * 100)
 })
 </script>

@@ -10,9 +10,10 @@ describe('CompletionSummary', () => {
     totalPoints: 50,
     completedPoints: 35,
     buckets: {
-      'bugs-tech-debt': { points: 20, completedPoints: 15 },
-      'feature-work': { points: 25, completedPoints: 20 },
-      'learning': { points: 5, completedPoints: 0 }
+      'tech-debt-quality': { points: 20, completedPoints: 15 },
+      'new-features': { points: 25, completedPoints: 20 },
+      'learning-enablement': { points: 5, completedPoints: 0 },
+      'uncategorized': { points: 0, completedPoints: 0 }
     }
   }
 
@@ -58,9 +59,9 @@ describe('CompletionSummary', () => {
       props: { summary: mockSummary, sprintState: 'closed' }
     })
 
-    expect(wrapper.text()).toContain('Bugs & Tech Debt')
+    expect(wrapper.text()).toContain('Tech Debt & Quality')
     expect(wrapper.text()).toContain('15/20')
-    expect(wrapper.text()).toContain('Feature Work')
+    expect(wrapper.text()).toContain('New Features')
     expect(wrapper.text()).toContain('20/25')
   })
 
@@ -69,9 +70,10 @@ describe('CompletionSummary', () => {
       totalPoints: 45,
       completedPoints: 35,
       buckets: {
-        'bugs-tech-debt': { points: 20, completedPoints: 15 },
-        'feature-work': { points: 25, completedPoints: 20 },
-        'learning': { points: 0, completedPoints: 0 }
+        'tech-debt-quality': { points: 20, completedPoints: 15 },
+        'new-features': { points: 25, completedPoints: 20 },
+        'learning-enablement': { points: 0, completedPoints: 0 },
+        'uncategorized': { points: 0, completedPoints: 0 }
       }
     }
 
@@ -79,7 +81,7 @@ describe('CompletionSummary', () => {
       props: { summary: summaryWithZero, sprintState: 'closed' }
     })
 
-    expect(wrapper.text()).not.toContain('Learning')
+    expect(wrapper.text()).not.toContain('Learning & Enablement')
   })
 
   it('handles 100% completion', () => {
@@ -87,9 +89,10 @@ describe('CompletionSummary', () => {
       totalPoints: 30,
       completedPoints: 30,
       buckets: {
-        'bugs-tech-debt': { points: 15, completedPoints: 15 },
-        'feature-work': { points: 15, completedPoints: 15 },
-        'learning': { points: 0, completedPoints: 0 }
+        'tech-debt-quality': { points: 15, completedPoints: 15 },
+        'new-features': { points: 15, completedPoints: 15 },
+        'learning-enablement': { points: 0, completedPoints: 0 },
+        'uncategorized': { points: 0, completedPoints: 0 }
       }
     }
 

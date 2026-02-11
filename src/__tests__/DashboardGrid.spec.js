@@ -16,11 +16,11 @@ describe('DashboardGrid', () => {
   const mockBoardSprintData = {
     1: {
       sprint: { id: 100, name: 'Sprint 42', state: 'active', startDate: '2026-02-03T00:00:00.000Z', endDate: '2026-02-14T00:00:00.000Z' },
-      summary: { totalPoints: 45, estimatedIssueCount: 10, unestimatedIssueCount: 3, buckets: { 'bugs-tech-debt': { points: 20, issueCount: 4, completedPoints: 10 }, 'feature-work': { points: 25, issueCount: 6, completedPoints: 10 }, 'learning': { points: 0, issueCount: 0, completedPoints: 0 } } }
+      summary: { totalPoints: 45, estimatedIssueCount: 10, unestimatedIssueCount: 3, buckets: { 'tech-debt-quality': { points: 20, issueCount: 4, completedPoints: 10 }, 'new-features': { points: 25, issueCount: 6, completedPoints: 10 }, 'learning-enablement': { points: 0, issueCount: 0, completedPoints: 0 }, 'uncategorized': { points: 0, issueCount: 0, completedPoints: 0 } } }
     },
     2: {
       sprint: { id: 101, name: 'Sprint 42', state: 'active', startDate: '2026-02-03T00:00:00.000Z', endDate: '2026-02-14T00:00:00.000Z' },
-      summary: { totalPoints: 30, estimatedIssueCount: 6, unestimatedIssueCount: 0, buckets: { 'bugs-tech-debt': { points: 10, issueCount: 2, completedPoints: 5 }, 'feature-work': { points: 20, issueCount: 4, completedPoints: 5 }, 'learning': { points: 0, issueCount: 0, completedPoints: 0 } } }
+      summary: { totalPoints: 30, estimatedIssueCount: 6, unestimatedIssueCount: 0, buckets: { 'tech-debt-quality': { points: 10, issueCount: 2, completedPoints: 5 }, 'new-features': { points: 20, issueCount: 4, completedPoints: 5 }, 'learning-enablement': { points: 0, issueCount: 0, completedPoints: 0 }, 'uncategorized': { points: 0, issueCount: 0, completedPoints: 0 } } }
     }
   }
 
@@ -113,9 +113,10 @@ describe('DashboardGrid', () => {
 
     const legend = wrapper.find('[data-testid="allocation-legend"]')
     expect(legend.exists()).toBe(true)
-    expect(legend.text()).toContain('Bugs & Tech Debt')
-    expect(legend.text()).toContain('Feature Work')
-    expect(legend.text()).toContain('Learning')
+    expect(legend.text()).toContain('Tech Debt & Quality')
+    expect(legend.text()).toContain('New Features')
+    expect(legend.text()).toContain('Learning & Enablement')
+    expect(legend.text()).toContain('Uncategorized')
   })
 
   it('does not render legend when no boards', () => {

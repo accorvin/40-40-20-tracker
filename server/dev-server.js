@@ -135,7 +135,7 @@ async function fetchSprintIssues(sprintId) {
 
   while (startAt < total) {
     const data = await jiraRequest(
-      `/rest/agile/1.0/sprint/${sprintId}/issue?startAt=${startAt}&maxResults=${maxResults}&fields=summary,issuetype,status,assignee,customfield_12310243,resolution,resolutiondate`
+      `/rest/agile/1.0/sprint/${sprintId}/issue?startAt=${startAt}&maxResults=${maxResults}&fields=summary,issuetype,status,assignee,customfield_12310243,customfield_12320040,resolution,resolutiondate`
     );
 
     total = data.total;
@@ -150,6 +150,7 @@ async function fetchSprintIssues(sprintId) {
         status: issue.fields.status?.name || null,
         assignee: issue.fields.assignee?.displayName || null,
         storyPoints: storyPoints,
+        activityType: issue.fields.customfield_12320040?.value || null,
         resolution: issue.fields.resolution?.name || null,
         resolutionDate: issue.fields.resolutiondate || null,
         url: `${JIRA_HOST}/browse/${issue.key}`
@@ -162,48 +163,25 @@ async function fetchSprintIssues(sprintId) {
   return issues;
 }
 
-async function fetchFeatureWorkKeys() {
-  const featureKeys = new Set();
-  let startAt = 0;
-  const maxResults = 100;
-  let total = Infinity;
-
-  const jql = encodeURIComponent(
-    'issueFunction in linkedIssuesOf(' +
-    '"project = RHOAIENG AND issuetype = Epic AND issueFunction in linkedIssuesOf(' +
-    '\'project = RHAISTRAT AND issuetype = Feature\', \'is parent of\')", ' +
-    '"is epic of")'
-  );
-
-  while (startAt < total) {
-    const data = await jiraRequest(
-      `/rest/api/2/search?jql=${jql}&startAt=${startAt}&maxResults=${maxResults}&fields=key`
-    );
-
-    total = data.total;
-    data.issues.forEach(issue => featureKeys.add(issue.key));
-    startAt += maxResults;
+function classifyIssue(issue) {
+  switch (issue.activityType) {
+    case 'Tech Debt & Quality':
+      return 'tech-debt-quality';
+    case 'New Features':
+      return 'new-features';
+    case 'Learning & Enablement':
+      return 'learning-enablement';
+    default:
+      return 'uncategorized';
   }
-
-  console.log(`Found ${featureKeys.size} feature work issue keys`);
-  return featureKeys;
-}
-
-function classifyIssue(issue, featureWorkKeys) {
-  if (issue.issueType === 'Bug') {
-    return 'bugs-tech-debt';
-  }
-  if (featureWorkKeys.has(issue.key)) {
-    return 'feature-work';
-  }
-  return 'bugs-tech-debt';
 }
 
 function buildSprintSummary(issues) {
   const buckets = {
-    'bugs-tech-debt': { points: 0, issueCount: 0, completedPoints: 0 },
-    'feature-work': { points: 0, issueCount: 0, completedPoints: 0 },
-    'learning': { points: 0, issueCount: 0, completedPoints: 0 }
+    'tech-debt-quality': { points: 0, issueCount: 0, completedPoints: 0 },
+    'new-features': { points: 0, issueCount: 0, completedPoints: 0 },
+    'learning-enablement': { points: 0, issueCount: 0, completedPoints: 0 },
+    'uncategorized': { points: 0, issueCount: 0, completedPoints: 0 }
   };
 
   let totalPoints = 0;
@@ -303,16 +281,6 @@ async function performRefreshWork(projectKey, hardRefresh) {
     }
   }
 
-  // Fetch feature work keys
-  console.log('Fetching feature work keys...');
-  let featureWorkKeys;
-  try {
-    featureWorkKeys = await fetchFeatureWorkKeys();
-  } catch (error) {
-    console.warn('Failed to fetch feature work keys, defaulting all to bugs-tech-debt:', error.message);
-    featureWorkKeys = new Set();
-  }
-
   // Process boards in parallel (concurrency of 5)
   const CONCURRENCY = 5;
   const boardResults = [];
@@ -359,7 +327,7 @@ async function performRefreshWork(projectKey, hardRefresh) {
 
         const classifiedIssues = rawIssues.map(issue => ({
           ...issue,
-          bucket: classifyIssue(issue, featureWorkKeys),
+          bucket: classifyIssue(issue),
           completed: issue.resolution != null
         }));
 
@@ -469,8 +437,7 @@ async function performRefreshWork(projectKey, hardRefresh) {
     success: true,
     projectKey,
     boardCount: boards.length,
-    sprintCount: allSprintResults.length,
-    featureWorkKeysFound: featureWorkKeys.size
+    sprintCount: allSprintResults.length
   };
 }
 
