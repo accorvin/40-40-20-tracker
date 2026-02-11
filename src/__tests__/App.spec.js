@@ -7,6 +7,8 @@ import { ref } from 'vue'
 import App from '../App.vue'
 import BoardSettings from '../components/BoardSettings.vue'
 import DashboardGrid from '../components/DashboardGrid.vue'
+import FilterEditor from '../components/FilterEditor.vue'
+import FilterSelector from '../components/FilterSelector.vue'
 import TeamDetail from '../components/TeamDetail.vue'
 
 // Mock useAuth composable
@@ -626,5 +628,244 @@ describe('App', () => {
 
     // Should only have 2 fetch calls: /boards and /dashboard-summary
     expect(fetch).toHaveBeenCalledTimes(2)
+  })
+
+  describe('Saved Filters', () => {
+    it('renders FilterSelector in dashboard view', async () => {
+      const wrapper = mount(App)
+      await flushPromises()
+
+      const filterSelector = wrapper.findComponent(FilterSelector)
+      expect(filterSelector.exists()).toBe(true)
+    })
+
+    it('does not render FilterSelector in team detail view', async () => {
+      const wrapper = mount(App)
+      await flushPromises()
+
+      const grid = wrapper.findComponent(DashboardGrid)
+      grid.vm.$emit('select-team', mockBoardsResponse.boards[0])
+      await flushPromises()
+
+      const filterSelector = wrapper.findComponent(FilterSelector)
+      expect(filterSelector.exists()).toBe(false)
+    })
+
+    it('passes all boards to DashboardGrid when no filter is active', async () => {
+      const wrapper = mount(App)
+      await flushPromises()
+
+      const grid = wrapper.findComponent(DashboardGrid)
+      expect(grid.props('boards')).toHaveLength(2)
+    })
+
+    it('passes filtered boards to DashboardGrid when a filter is active', async () => {
+      // Pre-set a filter in localStorage that includes only board 1
+      localStorageMock.getItem.mockImplementation((key) => {
+        if (key === 'dashboardFilters') {
+          return JSON.stringify([{ id: 'f1', name: 'Just Alpha', boardIds: [1] }])
+        }
+        if (key === 'activeFilterId') return 'f1'
+        return null
+      })
+
+      const wrapper = mount(App)
+      await flushPromises()
+
+      const grid = wrapper.findComponent(DashboardGrid)
+      expect(grid.props('boards')).toHaveLength(1)
+      expect(grid.props('boards')[0].id).toBe(1)
+    })
+
+    it('shows all boards when "All Teams" is selected', async () => {
+      // Start with a filter active
+      localStorageMock.getItem.mockImplementation((key) => {
+        if (key === 'dashboardFilters') {
+          return JSON.stringify([{ id: 'f1', name: 'Just Alpha', boardIds: [1] }])
+        }
+        if (key === 'activeFilterId') return 'f1'
+        return null
+      })
+
+      const wrapper = mount(App)
+      await flushPromises()
+
+      // Select "All Teams" via FilterSelector
+      const filterSelector = wrapper.findComponent(FilterSelector)
+      filterSelector.vm.$emit('select-filter', null)
+      await wrapper.vm.$nextTick()
+
+      const grid = wrapper.findComponent(DashboardGrid)
+      expect(grid.props('boards')).toHaveLength(2)
+    })
+
+    it('opens FilterEditor when create-filter is emitted', async () => {
+      const wrapper = mount(App)
+      await flushPromises()
+
+      const filterSelector = wrapper.findComponent(FilterSelector)
+      filterSelector.vm.$emit('create-filter')
+      await wrapper.vm.$nextTick()
+
+      const editor = wrapper.findComponent(FilterEditor)
+      expect(editor.exists()).toBe(true)
+      expect(editor.props('filter')).toBeNull()
+    })
+
+    it('opens FilterEditor with filter data when edit-filter is emitted', async () => {
+      localStorageMock.getItem.mockImplementation((key) => {
+        if (key === 'dashboardFilters') {
+          return JSON.stringify([{ id: 'f1', name: 'My Teams', boardIds: [1] }])
+        }
+        return null
+      })
+
+      const wrapper = mount(App)
+      await flushPromises()
+
+      const filterSelector = wrapper.findComponent(FilterSelector)
+      filterSelector.vm.$emit('edit-filter', 'f1')
+      await wrapper.vm.$nextTick()
+
+      const editor = wrapper.findComponent(FilterEditor)
+      expect(editor.exists()).toBe(true)
+      expect(editor.props('filter').id).toBe('f1')
+      expect(editor.props('filter').name).toBe('My Teams')
+    })
+
+    it('passes all boards to FilterEditor', async () => {
+      const wrapper = mount(App)
+      await flushPromises()
+
+      const filterSelector = wrapper.findComponent(FilterSelector)
+      filterSelector.vm.$emit('create-filter')
+      await wrapper.vm.$nextTick()
+
+      const editor = wrapper.findComponent(FilterEditor)
+      expect(editor.props('boards')).toHaveLength(2)
+    })
+
+    it('creates a new filter when FilterEditor emits save in create mode', async () => {
+      const wrapper = mount(App)
+      await flushPromises()
+
+      // Open create modal
+      const filterSelector = wrapper.findComponent(FilterSelector)
+      filterSelector.vm.$emit('create-filter')
+      await wrapper.vm.$nextTick()
+
+      // Save the filter
+      const editor = wrapper.findComponent(FilterEditor)
+      editor.vm.$emit('save', { name: 'New Filter', boardIds: [1] })
+      await wrapper.vm.$nextTick()
+
+      // Editor should close
+      expect(wrapper.findComponent(FilterEditor).exists()).toBe(false)
+
+      // Filter should be persisted
+      const savedCall = localStorageMock.setItem.mock.calls.find(
+        ([key]) => key === 'dashboardFilters'
+      )
+      expect(savedCall).toBeTruthy()
+      const saved = JSON.parse(savedCall[1])
+      expect(saved.some(f => f.name === 'New Filter')).toBe(true)
+    })
+
+    it('updates a filter when FilterEditor emits save in edit mode', async () => {
+      localStorageMock.getItem.mockImplementation((key) => {
+        if (key === 'dashboardFilters') {
+          return JSON.stringify([{ id: 'f1', name: 'Old Name', boardIds: [1] }])
+        }
+        return null
+      })
+
+      const wrapper = mount(App)
+      await flushPromises()
+
+      // Open edit modal
+      const filterSelector = wrapper.findComponent(FilterSelector)
+      filterSelector.vm.$emit('edit-filter', 'f1')
+      await wrapper.vm.$nextTick()
+
+      // Save updated filter
+      const editor = wrapper.findComponent(FilterEditor)
+      editor.vm.$emit('save', { name: 'Updated Name', boardIds: [1, 2] })
+      await wrapper.vm.$nextTick()
+
+      // Editor should close
+      expect(wrapper.findComponent(FilterEditor).exists()).toBe(false)
+
+      // Filter should be updated in localStorage
+      const savedCalls = localStorageMock.setItem.mock.calls.filter(
+        ([key]) => key === 'dashboardFilters'
+      )
+      const lastSave = JSON.parse(savedCalls[savedCalls.length - 1][1])
+      expect(lastSave[0].name).toBe('Updated Name')
+      expect(lastSave[0].boardIds).toEqual([1, 2])
+    })
+
+    it('deletes a filter when delete-filter is emitted', async () => {
+      localStorageMock.getItem.mockImplementation((key) => {
+        if (key === 'dashboardFilters') {
+          return JSON.stringify([
+            { id: 'f1', name: 'Filter One', boardIds: [1] },
+            { id: 'f2', name: 'Filter Two', boardIds: [2] }
+          ])
+        }
+        return null
+      })
+
+      const wrapper = mount(App)
+      await flushPromises()
+
+      const filterSelector = wrapper.findComponent(FilterSelector)
+      filterSelector.vm.$emit('delete-filter', 'f1')
+      await wrapper.vm.$nextTick()
+
+      // Check that filter was removed from localStorage
+      const savedCalls = localStorageMock.setItem.mock.calls.filter(
+        ([key]) => key === 'dashboardFilters'
+      )
+      const lastSave = JSON.parse(savedCalls[savedCalls.length - 1][1])
+      expect(lastSave).toHaveLength(1)
+      expect(lastSave[0].id).toBe('f2')
+    })
+
+    it('closes FilterEditor when cancel is emitted', async () => {
+      const wrapper = mount(App)
+      await flushPromises()
+
+      // Open create modal
+      const filterSelector = wrapper.findComponent(FilterSelector)
+      filterSelector.vm.$emit('create-filter')
+      await wrapper.vm.$nextTick()
+
+      expect(wrapper.findComponent(FilterEditor).exists()).toBe(true)
+
+      // Cancel
+      const editor = wrapper.findComponent(FilterEditor)
+      editor.vm.$emit('cancel')
+      await wrapper.vm.$nextTick()
+
+      expect(wrapper.findComponent(FilterEditor).exists()).toBe(false)
+    })
+
+    it('excludes boards not in active filter even if they exist in API response', async () => {
+      // Filter only includes board 2
+      localStorageMock.getItem.mockImplementation((key) => {
+        if (key === 'dashboardFilters') {
+          return JSON.stringify([{ id: 'f1', name: 'Beta Only', boardIds: [2] }])
+        }
+        if (key === 'activeFilterId') return 'f1'
+        return null
+      })
+
+      const wrapper = mount(App)
+      await flushPromises()
+
+      const grid = wrapper.findComponent(DashboardGrid)
+      expect(grid.props('boards')).toHaveLength(1)
+      expect(grid.props('boards')[0].displayName).toBe('Team Beta')
+    })
   })
 })

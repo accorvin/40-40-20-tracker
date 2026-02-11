@@ -118,8 +118,19 @@
 
       <!-- Dashboard View -->
       <main v-if="currentView === 'dashboard'" class="relative">
+        <div class="container mx-auto px-6 pt-4">
+          <FilterSelector
+            :filters="filters"
+            :activeFilterId="activeFilterId"
+            @select-filter="setActiveFilter"
+            @create-filter="openCreateFilter"
+            @edit-filter="openEditFilter"
+            @delete-filter="handleDeleteFilter"
+          />
+        </div>
+
         <DashboardGrid
-          :boards="boards"
+          :boards="filteredBoards"
           :boardSprintData="boardSprintData"
           @select-team="handleSelectTeam"
         />
@@ -148,6 +159,14 @@
         />
       </main>
 
+      <FilterEditor
+        v-if="showFilterEditor"
+        :boards="boards"
+        :filter="editingFilter"
+        @save="handleSaveFilter"
+        @cancel="showFilterEditor = false"
+      />
+
       <Toast
         v-for="toast in toasts"
         :key="toast.id"
@@ -164,10 +183,13 @@
 import AuthGuard from './components/AuthGuard.vue'
 import BoardSettings from './components/BoardSettings.vue'
 import DashboardGrid from './components/DashboardGrid.vue'
+import FilterEditor from './components/FilterEditor.vue'
+import FilterSelector from './components/FilterSelector.vue'
 import LoadingOverlay from './components/LoadingOverlay.vue'
 import TeamDetail from './components/TeamDetail.vue'
 import Toast from './components/Toast.vue'
 import { useAuth } from './composables/useAuth'
+import { useSavedFilters } from './composables/useSavedFilters'
 import { refreshData as apiRefreshData, getBoards, getDashboardSummary, getSprintsForBoard, getSprintIssues } from './services/api'
 
 export default {
@@ -176,15 +198,25 @@ export default {
     AuthGuard,
     BoardSettings,
     DashboardGrid,
+    FilterEditor,
+    FilterSelector,
     LoadingOverlay,
     TeamDetail,
     Toast
   },
   setup() {
     const { user: authUser, signOut } = useAuth()
+    const { filters, activeFilterId, activeFilter, createFilter, updateFilter, deleteFilter, setActiveFilter } = useSavedFilters()
     return {
       authUser,
-      signOut
+      signOut,
+      filters,
+      activeFilterId,
+      activeFilter,
+      createFilter,
+      updateFilter,
+      deleteFilter,
+      setActiveFilter
     }
   },
   data() {
@@ -204,10 +236,16 @@ export default {
       showUserMenu: false,
       showRefreshMenu: false,
       avatarLoadError: false,
-      toasts: []
+      toasts: [],
+      showFilterEditor: false,
+      editingFilter: null
     }
   },
   computed: {
+    filteredBoards() {
+      if (!this.activeFilter) return this.boards
+      return this.boards.filter(b => this.activeFilter.boardIds.includes(b.id))
+    },
     isDataStale() {
       if (!this.lastUpdated) return false
       const age = Date.now() - new Date(this.lastUpdated).getTime()
@@ -441,6 +479,30 @@ export default {
 
     removeToast(id) {
       this.toasts = this.toasts.filter(t => t.id !== id)
+    },
+
+    openCreateFilter() {
+      this.editingFilter = null
+      this.showFilterEditor = true
+    },
+
+    openEditFilter(id) {
+      this.editingFilter = this.filters.find(f => f.id === id) || null
+      this.showFilterEditor = true
+    },
+
+    handleSaveFilter({ name, boardIds }) {
+      if (this.editingFilter) {
+        this.updateFilter(this.editingFilter.id, { name, boardIds })
+      } else {
+        this.createFilter({ name, boardIds })
+      }
+      this.showFilterEditor = false
+      this.editingFilter = null
+    },
+
+    handleDeleteFilter(id) {
+      this.deleteFilter(id)
     },
 
     getUserInitials(user) {
