@@ -59,6 +59,14 @@ rh-aws-saml-login iaps-rhods-odh-dev amplify publish
 │   └── backend/
 │       ├── function/
 │       │   ├── jiraFetcher/    # Lambda: Fetch from Jira -> S3
+│       │   │   └── src/
+│       │   │       ├── shared/              # Shared business logic (used by Lambda + dev server)
+│       │   │       │   ├── classification.js # classifyIssue, buildSprintSummary, staleness
+│       │   │       │   ├── jira-client.js    # createJiraClient factory (pagination logic)
+│       │   │       │   ├── orchestration.js  # discoverBoards, performRefresh (DI for I/O)
+│       │   │       │   └── index.js          # Re-exports all shared modules
+│       │   │       ├── app.js               # Express routes + AWS wiring (thin layer)
+│       │   │       └── index.js             # Lambda handler entry point
 │       │   └── dataReader/     # Lambda: Read from S3
 │       └── api/
 │           └── allocationApi/  # API Gateway configuration
@@ -83,8 +91,10 @@ rh-aws-saml-login iaps-rhods-odh-dev amplify publish
 
 ## Testing Conventions
 
-- Test files: `src/__tests__/<ComponentName>.spec.js`
+- Frontend test files: `src/__tests__/<ComponentName>.spec.js`
+- Shared module test files: `amplify/backend/function/jiraFetcher/src/shared/__tests__/*.spec.js`
 - Use `@vue/test-utils` for component mounting
+- Use `// @vitest-environment node` comment in non-browser test files
 - Test component rendering, props, events, and user interactions
 
 ## Commit Messages

@@ -31,6 +31,8 @@ amplify/.config/local-*
 amplify/logs/
 amplify/mock-data/
 amplify/mock-api-resources/
+amplify/backend/**/build/
+amplify/team-provider-info.json
 aws-exports.js
 awsconfiguration.json
 amplifyconfiguration.json

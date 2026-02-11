@@ -14,6 +14,8 @@
 const express = require('express');
 const fetch = require('node-fetch');
 const { readFromStorage, writeToStorage } = require('./storage');
+const { createJiraClient } = require('../amplify/backend/function/jiraFetcher/src/shared/jira-client');
+const { discoverBoards, performRefresh } = require('../amplify/backend/function/jiraFetcher/src/shared/orchestration');
 
 const app = express();
 app.use(express.json());
@@ -75,446 +77,31 @@ async function jiraRequest(path) {
   return response.json();
 }
 
-async function fetchBoards(projectKey) {
-  const boards = [];
-  let startAt = 0;
-  const maxResults = 50;
-  let isLast = false;
+// Create Jira client using dev server's simple jiraRequest
+const jiraClient = createJiraClient({ jiraRequest, jiraHost: JIRA_HOST });
 
-  while (!isLast) {
-    const data = await jiraRequest(
-      `/rest/agile/1.0/board?projectKeyOrId=${projectKey}&type=scrum&startAt=${startAt}&maxResults=${maxResults}`
-    );
-
-    boards.push(...data.values.map(board => ({
-      id: board.id,
-      name: board.name,
-      projectKey: projectKey
-    })));
-
-    isLast = data.isLast;
-    startAt += maxResults;
-  }
-
-  return boards;
-}
-
-async function fetchSprints(boardId) {
-  const sprints = [];
-  let startAt = 0;
-  const maxResults = 50;
-  let isLast = false;
-
-  while (!isLast) {
-    const data = await jiraRequest(
-      `/rest/agile/1.0/board/${boardId}/sprint?startAt=${startAt}&maxResults=${maxResults}`
-    );
-
-    sprints.push(...data.values.map(sprint => ({
-      id: sprint.id,
-      name: sprint.name,
-      state: sprint.state,
-      startDate: sprint.startDate || null,
-      endDate: sprint.endDate || null,
-      completeDate: sprint.completeDate || null,
-      boardId: boardId
-    })));
-
-    isLast = data.isLast;
-    startAt += maxResults;
-  }
-
-  return sprints;
-}
-
-async function fetchSprintIssues(sprintId) {
-  const issues = [];
-  let startAt = 0;
-  const maxResults = 100;
-  let total = Infinity;
-
-  while (startAt < total) {
-    const data = await jiraRequest(
-      `/rest/agile/1.0/sprint/${sprintId}/issue?startAt=${startAt}&maxResults=${maxResults}&fields=summary,issuetype,status,assignee,customfield_12310243,customfield_12320040,resolution,resolutiondate`
-    );
-
-    total = data.total;
-
-    issues.push(...data.issues.map(issue => {
-      const storyPoints = issue.fields.customfield_12310243 ?? null;
-
-      return {
-        key: issue.key,
-        summary: issue.fields.summary,
-        issueType: issue.fields.issuetype?.name || null,
-        status: issue.fields.status?.name || null,
-        assignee: issue.fields.assignee?.displayName || null,
-        storyPoints: storyPoints,
-        activityType: issue.fields.customfield_12320040?.value || null,
-        resolution: issue.fields.resolution?.name || null,
-        resolutionDate: issue.fields.resolutiondate || null,
-        url: `${JIRA_HOST}/browse/${issue.key}`
-      };
-    }));
-
-    startAt += maxResults;
-  }
-
-  return issues;
-}
-
-const STALE_THRESHOLD_MS = 90 * 24 * 60 * 60 * 1000;
-
-function getLatestSprintEndDate(sprints) {
-  let latest = null;
-
-  for (const sprint of sprints) {
-    const dateStr = sprint.completeDate || sprint.endDate;
-    if (!dateStr) continue;
-
-    const date = new Date(dateStr);
-    if (isNaN(date.getTime())) continue;
-
-    if (!latest || date > new Date(latest)) {
-      latest = dateStr;
-    }
-  }
-
-  return latest;
-}
-
-function determineStaleness(sprints, now = new Date()) {
-  if (!sprints || sprints.length === 0) {
-    return { stale: true, lastSprintEndDate: null };
-  }
-
-  const hasActiveOrFuture = sprints.some(
-    s => s.state === 'active' || s.state === 'future'
-  );
-
-  if (hasActiveOrFuture) {
-    return { stale: false, lastSprintEndDate: getLatestSprintEndDate(sprints) };
-  }
-
-  const lastSprintEndDate = getLatestSprintEndDate(sprints);
-
-  if (!lastSprintEndDate) {
-    return { stale: true, lastSprintEndDate: null };
-  }
-
-  const elapsed = now.getTime() - new Date(lastSprintEndDate).getTime();
-  return { stale: elapsed > STALE_THRESHOLD_MS, lastSprintEndDate };
-}
-
-function classifyIssue(issue) {
-  switch (issue.activityType) {
-    case 'Tech Debt & Quality':
-      return 'tech-debt-quality';
-    case 'New Features':
-      return 'new-features';
-    case 'Learning & Enablement':
-      return 'learning-enablement';
-    default:
-      return 'uncategorized';
-  }
-}
-
-function buildSprintSummary(issues) {
-  const buckets = {
-    'tech-debt-quality': { points: 0, issueCount: 0, completedPoints: 0 },
-    'new-features': { points: 0, issueCount: 0, completedPoints: 0 },
-    'learning-enablement': { points: 0, issueCount: 0, completedPoints: 0 },
-    'uncategorized': { points: 0, issueCount: 0, completedPoints: 0 }
-  };
-
-  let totalPoints = 0;
-  let estimatedIssueCount = 0;
-  let unestimatedIssueCount = 0;
-
-  issues.forEach(issue => {
-    const bucket = buckets[issue.bucket];
-    if (!bucket) return;
-
-    bucket.issueCount++;
-
-    if (issue.storyPoints != null) {
-      bucket.points += issue.storyPoints;
-      totalPoints += issue.storyPoints;
-      estimatedIssueCount++;
-
-      if (issue.completed) {
-        bucket.completedPoints += issue.storyPoints;
-      }
-    } else {
-      unestimatedIssueCount++;
-    }
-  });
-
-  return { totalPoints, estimatedIssueCount, unestimatedIssueCount, buckets };
-}
+// Shared dependency bundle for orchestration functions
+const orchestrationDeps = {
+  ...jiraClient,
+  readStorage: readFromStorage,
+  writeStorage: writeToStorage
+};
 
 // ─── Routes: jiraFetcher ───
 
 app.post('/api/discover-boards', async function(req, res) {
   try {
     const projectKey = req.body.projectKey || 'RHOAIENG';
-
     console.log(`\nDiscovering boards for project ${projectKey}`);
 
-    const boards = await fetchBoards(projectKey);
-    console.log(`Found ${boards.length} scrum boards`);
+    const result = await discoverBoards({ ...orchestrationDeps, projectKey });
 
-    writeToStorage('boards.json', {
-      lastUpdated: new Date().toISOString(),
-      boards: boards
-    });
-
-    // Fetch sprints for each board to determine staleness (concurrency of 10)
-    const DISCOVER_CONCURRENCY = 10;
-    const boardStaleness = new Map();
-
-    for (let i = 0; i < boards.length; i += DISCOVER_CONCURRENCY) {
-      const chunk = boards.slice(i, i + DISCOVER_CONCURRENCY);
-      const results = await Promise.all(chunk.map(async (board) => {
-        try {
-          const sprints = await fetchSprints(board.id);
-          return { boardId: board.id, ...determineStaleness(sprints) };
-        } catch (error) {
-          console.warn(`Failed to fetch sprints for board ${board.id}, marking as not stale:`, error.message);
-          return { boardId: board.id, stale: false, lastSprintEndDate: null };
-        }
-      }));
-      results.forEach(r => boardStaleness.set(r.boardId, r));
-    }
-
-    const staleCount = [...boardStaleness.values()].filter(s => s.stale).length;
-    console.log(`Staleness check: ${staleCount} of ${boards.length} boards are stale`);
-
-    // Merge with existing teams config (preserve enabled/disabled state + manual overrides)
-    const existingTeams = readFromStorage('teams.json');
-    const existingMap = existingTeams?.teams
-      ? new Map(existingTeams.teams.map(t => [t.boardId, t]))
-      : new Map();
-
-    const mergedTeams = boards.map(b => {
-      const staleness = boardStaleness.get(b.id) || { stale: false, lastSprintEndDate: null };
-      const existing = existingMap.get(b.id);
-
-      if (existing) {
-        const updated = {
-          ...existing,
-          boardName: b.name,
-          stale: staleness.stale,
-          lastSprintEndDate: staleness.lastSprintEndDate
-        };
-        if (staleness.stale && !existing.manuallyConfigured) {
-          updated.enabled = false;
-        }
-        return updated;
-      }
-
-      return {
-        boardId: b.id,
-        boardName: b.name,
-        displayName: b.name.replace(/^RHOAIENG\s*[-–]\s*/, ''),
-        enabled: !staleness.stale,
-        stale: staleness.stale,
-        lastSprintEndDate: staleness.lastSprintEndDate,
-        manuallyConfigured: false
-      };
-    });
-
-    writeToStorage('teams.json', { teams: mergedTeams });
-
-    res.json({ success: true, boardCount: boards.length, staleCount });
+    res.json(result);
   } catch (error) {
     console.error('Discover boards error:', error);
     res.status(500).json({ error: error.message });
   }
 });
-
-async function performRefreshWork(projectKey, hardRefresh) {
-  console.log(`\nStarting refresh for project ${projectKey} (hardRefresh: ${hardRefresh})`);
-
-  // Fetch boards
-  console.log('Fetching boards...');
-  const allBoards = await fetchBoards(projectKey);
-  console.log(`Found ${allBoards.length} scrum boards`);
-
-  // Filter to enabled boards only
-  const teamsData = readFromStorage('teams.json');
-  let boards = allBoards;
-  if (teamsData && teamsData.teams) {
-    const teamMap = new Map(teamsData.teams.map(t => [t.boardId, t]));
-    boards = allBoards.filter(b => {
-      const team = teamMap.get(b.id);
-      return !team || team.enabled !== false;
-    });
-    const skipped = allBoards.length - boards.length;
-    if (skipped > 0) {
-      console.log(`Skipping ${skipped} disabled boards`);
-    }
-  }
-
-  // Process boards in parallel (concurrency of 5)
-  const CONCURRENCY = 5;
-  const boardResults = [];
-
-  for (let i = 0; i < boards.length; i += CONCURRENCY) {
-    const chunk = boards.slice(i, i + CONCURRENCY);
-    const chunkResults = await Promise.all(chunk.map(async (board) => {
-      console.log(`Processing board: ${board.name} (${board.id})`);
-
-      const sprints = await fetchSprints(board.id);
-      console.log(`  [${board.name}] Found ${sprints.length} sprints`);
-
-      const activeSprints = sprints.filter(s => s.state === 'active');
-      const futureSprints = sprints.filter(s => s.state === 'future');
-      const closedSprints = sprints
-        .filter(s => s.state === 'closed')
-        .sort((a, b) => new Date(b.completeDate || 0) - new Date(a.completeDate || 0))
-        .slice(0, 5);
-
-      const sprintsToProcess = [...activeSprints, ...futureSprints, ...closedSprints];
-      const sprintResults = [];
-
-      for (const sprint of sprintsToProcess) {
-        // Closed-sprint caching: skip Jira fetch if cached and not hard refresh
-        if (!hardRefresh && sprint.state === 'closed') {
-          const cached = readFromStorage(`sprints/${sprint.id}.json`);
-          if (cached) {
-            console.log(`  [${board.name}] Using cached data for closed sprint: ${sprint.name}`);
-            sprintResults.push({
-              sprintId: sprint.id,
-              sprintName: sprint.name,
-              state: sprint.state,
-              issueCount: cached.issues?.length || 0,
-              totalPoints: cached.summary?.totalPoints || 0,
-              summary: cached.summary
-            });
-            continue;
-          }
-        }
-
-        console.log(`  [${board.name}] Fetching sprint: ${sprint.name} (${sprint.state})`);
-
-        const rawIssues = await fetchSprintIssues(sprint.id);
-
-        const classifiedIssues = rawIssues.map(issue => ({
-          ...issue,
-          bucket: classifyIssue(issue),
-          completed: issue.resolution != null
-        }));
-
-        const summary = buildSprintSummary(classifiedIssues);
-
-        const sprintData = {
-          sprintId: sprint.id,
-          sprintName: sprint.name,
-          sprintState: sprint.state,
-          startDate: sprint.startDate,
-          endDate: sprint.endDate,
-          completeDate: sprint.completeDate,
-          boardId: board.id,
-          lastUpdated: new Date().toISOString(),
-          issues: classifiedIssues,
-          summary
-        };
-
-        writeToStorage(`sprints/${sprint.id}.json`, sprintData);
-
-        sprintResults.push({
-          sprintId: sprint.id,
-          sprintName: sprint.name,
-          state: sprint.state,
-          issueCount: classifiedIssues.length,
-          totalPoints: summary.totalPoints,
-          summary
-        });
-      }
-
-      writeToStorage(`sprints/board-${board.id}.json`, {
-        boardId: board.id,
-        boardName: board.name,
-        lastUpdated: new Date().toISOString(),
-        sprints: sprintsToProcess.map(s => ({
-          id: s.id,
-          name: s.name,
-          state: s.state,
-          startDate: s.startDate,
-          endDate: s.endDate,
-          completeDate: s.completeDate
-        }))
-      });
-
-      // Pick the active sprint (or most recent closed) for dashboard summary
-      const dashboardSprint = activeSprints[0] || closedSprints[0] || null;
-      const dashboardSprintResult = dashboardSprint
-        ? sprintResults.find(r => r.sprintId === dashboardSprint.id)
-        : null;
-
-      return {
-        board,
-        sprintResults,
-        dashboardSprint,
-        dashboardSprintResult
-      };
-    }));
-
-    boardResults.push(...chunkResults);
-  }
-
-  writeToStorage('boards.json', {
-    lastUpdated: new Date().toISOString(),
-    boards: allBoards
-  });
-
-  // Auto-generate teams config if it doesn't exist
-  const existingTeams = readFromStorage('teams.json');
-  if (!existingTeams) {
-    writeToStorage('teams.json', {
-      teams: allBoards.map(b => ({
-        boardId: b.id,
-        boardName: b.name,
-        displayName: b.name.replace(/^RHOAIENG\s*[-–]\s*/, ''),
-        enabled: true
-      }))
-    });
-  }
-
-  // Generate dashboard-summary.json
-  const dashboardSummary = {
-    lastUpdated: new Date().toISOString(),
-    boards: {}
-  };
-
-  for (const { board, dashboardSprint, dashboardSprintResult } of boardResults) {
-    if (dashboardSprint && dashboardSprintResult) {
-      dashboardSummary.boards[board.id] = {
-        sprint: {
-          id: dashboardSprint.id,
-          name: dashboardSprint.name,
-          state: dashboardSprint.state,
-          startDate: dashboardSprint.startDate,
-          endDate: dashboardSprint.endDate
-        },
-        summary: dashboardSprintResult.summary
-      };
-    }
-  }
-
-  writeToStorage('dashboard-summary.json', dashboardSummary);
-
-  const allSprintResults = boardResults.flatMap(r => r.sprintResults);
-  console.log(`\nRefresh complete: ${boards.length} boards, ${allSprintResults.length} sprints`);
-
-  return {
-    success: true,
-    projectKey,
-    boardCount: boards.length,
-    sprintCount: allSprintResults.length
-  };
-}
 
 app.post('/api/refresh', function(req, res) {
   const projectKey = req.body.projectKey || 'RHOAIENG';
@@ -523,7 +110,7 @@ app.post('/api/refresh', function(req, res) {
   res.json({ status: 'started' });
 
   setImmediate(() => {
-    performRefreshWork(projectKey, hardRefresh).catch(error => {
+    performRefresh({ ...orchestrationDeps, projectKey, hardRefresh }).catch(error => {
       console.error('Background refresh error:', error);
     });
   });
