@@ -1356,7 +1356,7 @@
         "Name": "allocationApi"
       }
     },
-    "allocationApiDefault4XXResponse11adb0d2": {
+    "allocationApiDefault4XXResponse8f1a6ef3": {
       "Type": "AWS::ApiGateway::GatewayResponse",
       "Properties": {
         "ResponseParameters": {
@@ -1371,7 +1371,7 @@
         }
       }
     },
-    "allocationApiDefault5XXResponse11adb0d2": {
+    "allocationApiDefault5XXResponse8f1a6ef3": {
       "Type": "AWS::ApiGateway::GatewayResponse",
       "Properties": {
         "ResponseParameters": {
@@ -1386,7 +1386,7 @@
         }
       }
     },
-    "DeploymentAPIGWallocationApi1ec692c0": {
+    "DeploymentAPIGWallocationApie35e7ac3": {
       "Type": "AWS::ApiGateway::Deployment",
       "Properties": {
         "Description": "The Development stage deployment of your API.",
@@ -1404,8 +1404,8 @@
         }
       },
       "DependsOn": [
-        "allocationApiDefault4XXResponse11adb0d2",
-        "allocationApiDefault5XXResponse11adb0d2"
+        "allocationApiDefault4XXResponse8f1a6ef3",
+        "allocationApiDefault5XXResponse8f1a6ef3"
       ]
     }
   }

@@ -7,6 +7,15 @@ const server = awsServerlessExpress.createServer(app);
 exports.handler = async (event, context) => {
   console.log(`EVENT: ${JSON.stringify(event)}`);
 
+  // Scheduled EventBridge refresh (hourly cron)
+  if (event.source === 'aws.events') {
+    console.log('Scheduled refresh triggered');
+    return performRefresh({
+      projectKey: 'RHOAIENG',
+      hardRefresh: false
+    });
+  }
+
   // Direct async invocation (from self-invoke for background refresh)
   if (event.action === 'refresh') {
     console.log('Handling direct refresh invocation');
