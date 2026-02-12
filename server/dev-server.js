@@ -61,20 +61,31 @@ function getJiraToken() {
 
 async function jiraRequest(path) {
   const token = getJiraToken();
+  const MAX_RETRIES = 3;
 
-  const response = await fetch(`${JIRA_HOST}${path}`, {
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Accept': 'application/json'
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const response = await fetch(`${JIRA_HOST}${path}`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/json'
+      }
+    });
+
+    if (response.status === 429 && attempt < MAX_RETRIES) {
+      const retryAfter = parseInt(response.headers.get('retry-after'), 10);
+      const delay = (!isNaN(retryAfter) && retryAfter > 0) ? retryAfter * 1000 : Math.pow(2, attempt + 1) * 1000;
+      console.warn(`[Jira API] Rate limited (429), retrying in ${delay / 1000}s (attempt ${attempt + 1}/${MAX_RETRIES})`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+      continue;
     }
-  });
 
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Jira API error (${response.status}): ${text}`);
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Jira API error (${response.status}): ${text}`);
+    }
+
+    return response.json();
   }
-
-  return response.json();
 }
 
 // Create Jira client using dev server's simple jiraRequest

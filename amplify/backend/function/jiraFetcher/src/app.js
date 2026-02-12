@@ -78,27 +78,38 @@ async function getJiraToken() {
 async function jiraRequest(path) {
   const token = await getJiraToken();
   const url = `${JIRA_HOST}${path}`;
+  const MAX_RETRIES = 3;
 
-  console.log(`[Jira API] GET ${url}`);
-  const startTime = Date.now();
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    console.log(`[Jira API] GET ${url}`);
+    const startTime = Date.now();
 
-  const response = await fetch(url, {
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Accept': 'application/json'
+    const response = await fetch(url, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/json'
+      }
+    });
+
+    const elapsed = Date.now() - startTime;
+
+    if (response.status === 429 && attempt < MAX_RETRIES) {
+      const retryAfter = parseInt(response.headers.get('retry-after'), 10);
+      const delay = (!isNaN(retryAfter) && retryAfter > 0) ? retryAfter * 1000 : Math.pow(2, attempt + 1) * 1000;
+      console.warn(`[Jira API] Rate limited (429) ${url} (${elapsed}ms), retrying in ${delay / 1000}s (attempt ${attempt + 1}/${MAX_RETRIES})`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+      continue;
     }
-  });
 
-  const elapsed = Date.now() - startTime;
+    if (!response.ok) {
+      const text = await response.text();
+      console.error(`[Jira API] FAILED ${response.status} ${url} (${elapsed}ms)`);
+      throw new Error(`Jira API error (${response.status}): ${text}`);
+    }
 
-  if (!response.ok) {
-    const text = await response.text();
-    console.error(`[Jira API] FAILED ${response.status} ${url} (${elapsed}ms)`);
-    throw new Error(`Jira API error (${response.status}): ${text}`);
+    console.log(`[Jira API] OK ${response.status} ${url} (${elapsed}ms)`);
+    return response.json();
   }
-
-  console.log(`[Jira API] OK ${response.status} ${url} (${elapsed}ms)`);
-  return response.json();
 }
 
 // Create Jira client using Lambda's jiraRequest (with SSM token + timing logs)

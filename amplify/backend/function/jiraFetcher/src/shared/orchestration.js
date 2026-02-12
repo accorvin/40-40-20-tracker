@@ -29,8 +29,8 @@ async function discoverBoards({ projectKey, fetchBoards, fetchSprints, readStora
     boards: boards
   });
 
-  // Fetch sprints for each board to determine staleness (concurrency of 10)
-  const DISCOVER_CONCURRENCY = 10;
+  // Fetch sprints for each board to determine staleness
+  const DISCOVER_CONCURRENCY = 3;
   const boardStaleness = new Map();
 
   for (let i = 0; i < boards.length; i += DISCOVER_CONCURRENCY) {
@@ -128,8 +128,8 @@ async function performRefresh({ projectKey, hardRefresh, fetchBoards, fetchSprin
     }
   }
 
-  // Step 2: Process boards in parallel (concurrency of 5)
-  const CONCURRENCY = 5;
+  // Step 2: Process boards in parallel
+  const CONCURRENCY = 2;
   const boardResults = [];
 
   for (let i = 0; i < boards.length; i += CONCURRENCY) {
