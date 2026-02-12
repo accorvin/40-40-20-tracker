@@ -111,13 +111,15 @@ export async function getDashboardSummary() {
 
 /**
  * Get list of boards from S3
+ * @param {string} [projectKey] - Optional project key to scope boards
  * @returns {Promise<{boards: Array}>}
  */
-export async function getBoards() {
+export async function getBoards(projectKey) {
   try {
     const token = await getAuthToken()
+    const query = projectKey ? `?project=${projectKey}` : ''
 
-    const response = await fetch(`${API_ENDPOINT}/boards`, {
+    const response = await fetch(`${API_ENDPOINT}/boards${query}`, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${token}`
@@ -148,13 +150,17 @@ export async function getBoards() {
 /**
  * Get sprints for a specific board from S3
  * @param {number} boardId - Board ID
+ * @param {object} [options]
+ * @param {AbortSignal} [options.signal]
+ * @param {string} [options.projectKey]
  * @returns {Promise<{sprints: Array}>}
  */
-export async function getSprintsForBoard(boardId, { signal } = {}) {
+export async function getSprintsForBoard(boardId, { signal, projectKey } = {}) {
   try {
     const token = await getAuthToken()
+    const query = projectKey ? `?project=${projectKey}` : ''
 
-    const response = await fetch(`${API_ENDPOINT}/boards/${boardId}/sprints`, {
+    const response = await fetch(`${API_ENDPOINT}/boards/${boardId}/sprints${query}`, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${token}`
@@ -182,13 +188,17 @@ export async function getSprintsForBoard(boardId, { signal } = {}) {
 /**
  * Get issues for a specific sprint from S3
  * @param {number} sprintId - Sprint ID
+ * @param {object} [options]
+ * @param {AbortSignal} [options.signal]
+ * @param {string} [options.projectKey]
  * @returns {Promise<object>} Sprint data with issues and summary
  */
-export async function getSprintIssues(sprintId, { signal } = {}) {
+export async function getSprintIssues(sprintId, { signal, projectKey } = {}) {
   try {
     const token = await getAuthToken()
+    const query = projectKey ? `?project=${projectKey}` : ''
 
-    const response = await fetch(`${API_ENDPOINT}/sprints/${sprintId}/issues`, {
+    const response = await fetch(`${API_ENDPOINT}/sprints/${sprintId}/issues${query}`, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${token}`
@@ -280,6 +290,103 @@ export async function discoverBoards(projectKey) {
     return await response.json()
   } catch (error) {
     console.error('Discover boards error:', error)
+    throw error
+  }
+}
+
+/**
+ * Get list of configured projects
+ * @returns {Promise<{orgName: string, projects: Array}>}
+ */
+export async function getProjects() {
+  try {
+    const token = await getAuthToken()
+
+    const response = await fetch(`${API_ENDPOINT}/projects`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json()
+
+      if (response.status === 401) {
+        throw new Error('Authentication failed. Please sign in again.')
+      }
+
+      throw new Error(errorData.error || `HTTP ${response.status}`)
+    }
+
+    return await response.json()
+  } catch (error) {
+    console.error('Get projects error:', error)
+    throw error
+  }
+}
+
+/**
+ * Get org-wide allocation summary
+ * @returns {Promise<object>}
+ */
+export async function getOrgSummary() {
+  try {
+    const token = await getAuthToken()
+
+    const response = await fetch(`${API_ENDPOINT}/org-summary`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json()
+
+      if (response.status === 401) {
+        throw new Error('Authentication failed. Please sign in again.')
+      }
+
+      throw new Error(errorData.error || `HTTP ${response.status}`)
+    }
+
+    return await response.json()
+  } catch (error) {
+    console.error('Get org summary error:', error)
+    throw error
+  }
+}
+
+/**
+ * Get project-level dashboard summary
+ * @param {string} projectKey - Jira project key
+ * @returns {Promise<{lastUpdated: string, boards: object}>}
+ */
+export async function getProjectSummary(projectKey) {
+  try {
+    const token = await getAuthToken()
+
+    const response = await fetch(`${API_ENDPOINT}/projects/${projectKey}/summary`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json()
+
+      if (response.status === 401) {
+        throw new Error('Authentication failed. Please sign in again.')
+      }
+
+      throw new Error(errorData.error || `HTTP ${response.status}`)
+    }
+
+    return await response.json()
+  } catch (error) {
+    console.error(`Get project summary error for ${projectKey}:`, error)
     throw error
   }
 }

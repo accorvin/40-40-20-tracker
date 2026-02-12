@@ -118,6 +118,15 @@ describe('App', () => {
 
   function setupFetchMock(overrides = {}) {
     fetch.mockImplementation((url, options) => {
+      if (url.endsWith('/projects')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            orgName: 'AI Engineering',
+            projects: [{ key: 'RHOAIENG', name: 'OpenShift AI Engineering', pillar: 'OpenShift AI' }]
+          })
+        })
+      }
       if (url.endsWith('/boards')) {
         return Promise.resolve({
           ok: true,
@@ -608,9 +617,18 @@ describe('App', () => {
     expect(body.hardRefresh).toBe(true)
   })
 
-  it('loads only 2 API calls on mount (boards + dashboard-summary)', async () => {
+  it('loads only 3 API calls on mount (projects + boards + dashboard-summary)', async () => {
     fetch.mockReset()
     fetch.mockImplementation((url) => {
+      if (url.endsWith('/projects')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            orgName: 'AI Engineering',
+            projects: [{ key: 'RHOAIENG', name: 'OpenShift AI Engineering', pillar: 'OpenShift AI' }]
+          })
+        })
+      }
       if (url.endsWith('/boards')) {
         return Promise.resolve({
           ok: true,
@@ -629,8 +647,8 @@ describe('App', () => {
     mount(App)
     await flushPromises()
 
-    // Should only have 2 fetch calls: /boards and /dashboard-summary
-    expect(fetch).toHaveBeenCalledTimes(2)
+    // Should have 3 fetch calls: /projects, /boards, and /dashboard-summary
+    expect(fetch).toHaveBeenCalledTimes(3)
   })
 
   describe('Saved Filters', () => {

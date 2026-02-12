@@ -1,6 +1,6 @@
 const awsServerlessExpress = require('aws-serverless-express');
 const app = require('./app');
-const { performRefresh } = require('./app');
+const { performRefresh, performMultiProjectRefresh, readOrgConfig } = require('./app');
 
 const server = awsServerlessExpress.createServer(app);
 
@@ -10,8 +10,19 @@ exports.handler = async (event, context) => {
   // Scheduled EventBridge refresh (hourly cron)
   if (event.source === 'aws.events') {
     console.log('Scheduled refresh triggered');
-    return performRefresh({
-      projectKey: 'RHOAIENG',
+    const orgConfig = await readOrgConfig();
+    const projects = orgConfig?.projects || [{ key: 'RHOAIENG', name: 'OpenShift AI Engineering' }];
+
+    if (projects.length === 1) {
+      // Single project: use original performRefresh for backward compatibility
+      return performRefresh({
+        projectKey: projects[0].key,
+        hardRefresh: false
+      });
+    }
+
+    return performMultiProjectRefresh({
+      projects,
       hardRefresh: false
     });
   }

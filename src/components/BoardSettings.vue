@@ -9,7 +9,7 @@
           <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
           </svg>
-          Back to Dashboard
+          Back
         </button>
       </div>
     </div>
@@ -18,6 +18,16 @@
       <div class="flex items-center justify-between mb-6">
         <h2 class="text-xl font-bold text-gray-900">Board Settings</h2>
         <div class="flex items-center gap-3">
+          <!-- Project selector when multi-project -->
+          <select
+            v-if="projects.length > 1"
+            v-model="selectedProjectKey"
+            class="text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary-300"
+          >
+            <option v-for="project in projects" :key="project.key" :value="project.key">
+              {{ project.name }}
+            </option>
+          </select>
           <button
             @click="handleDiscover"
             :disabled="isDiscovering"
@@ -81,14 +91,33 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { getTeams, saveTeams, discoverBoards } from '../services/api'
+
+const props = defineProps({
+  projects: {
+    type: Array,
+    default: () => []
+  }
+})
 
 const emit = defineEmits(['back', 'saved'])
 
 const teams = ref([])
 const isSaving = ref(false)
 const isDiscovering = ref(false)
+const selectedProjectKey = ref('')
+
+// Initialize project key from props
+onMounted(() => {
+  selectedProjectKey.value = props.projects.length > 0 ? props.projects[0].key : 'RHOAIENG'
+  loadTeams()
+})
+
+// Reload teams when project selection changes
+watch(selectedProjectKey, () => {
+  loadTeams()
+})
 
 const sortedTeams = computed(() => {
   return [...teams.value].sort((a, b) => {
@@ -149,7 +178,7 @@ async function handleSave() {
 async function handleDiscover() {
   isDiscovering.value = true
   try {
-    await discoverBoards('RHOAIENG')
+    await discoverBoards(selectedProjectKey.value)
     await loadTeams()
   } catch (error) {
     console.error('Failed to discover boards:', error)
@@ -157,6 +186,4 @@ async function handleDiscover() {
     isDiscovering.value = false
   }
 }
-
-onMounted(loadTeams)
 </script>

@@ -116,8 +116,20 @@
         </div>
       </header>
 
-      <!-- Dashboard View -->
-      <main v-if="currentView === 'dashboard'" class="relative">
+      <!-- Org Dashboard View (multi-project) -->
+      <main v-if="currentView === 'org-dashboard'" class="relative">
+        <OrgDashboard
+          :orgName="orgName"
+          :orgSummary="orgSummary"
+          :projects="projects"
+          :projectSummaries="projectSummaries"
+          @select-project="handleSelectProject"
+        />
+        <LoadingOverlay v-if="isLoading" />
+      </main>
+
+      <!-- Legacy Dashboard View (single project, shown when only 1 project) -->
+      <main v-else-if="currentView === 'dashboard'" class="relative">
         <div class="container mx-auto px-6 pt-4">
           <FilterSelector
             :filters="filters"
@@ -138,6 +150,26 @@
         <LoadingOverlay v-if="isLoading" />
       </main>
 
+      <!-- Project Detail View -->
+      <main v-else-if="currentView === 'project-detail'">
+        <ProjectDetail
+          :project="selectedProject"
+          :projectSummary="selectedProjectSummary"
+          :boards="boards"
+          :boardSprintData="boardSprintData"
+          :isLoading="isLoading"
+          :filters="filters"
+          :activeFilterId="activeFilterId"
+          :activeFilter="activeFilter"
+          @back="handleBackToOrg"
+          @select-team="handleSelectTeam"
+          @select-filter="setActiveFilter"
+          @create-filter="openCreateFilter"
+          @edit-filter="openEditFilter"
+          @delete-filter="handleDeleteFilter"
+        />
+      </main>
+
       <!-- Team Detail View -->
       <main v-else-if="currentView === 'team-detail'">
         <TeamDetail
@@ -147,14 +179,15 @@
           :sprintData="teamSprintData"
           :isLoading="isTeamDetailLoading"
           @select-sprint="handleSelectSprint"
-          @back="currentView = 'dashboard'"
+          @back="handleBackFromTeamDetail"
         />
       </main>
 
       <!-- Board Settings View -->
       <main v-else-if="currentView === 'board-settings'">
         <BoardSettings
-          @back="currentView = 'dashboard'"
+          :projects="projects"
+          @back="handleBackFromSettings"
           @saved="handleSettingsSaved"
         />
       </main>
@@ -186,11 +219,22 @@ import DashboardGrid from './components/DashboardGrid.vue'
 import FilterEditor from './components/FilterEditor.vue'
 import FilterSelector from './components/FilterSelector.vue'
 import LoadingOverlay from './components/LoadingOverlay.vue'
+import OrgDashboard from './components/OrgDashboard.vue'
+import ProjectDetail from './components/ProjectDetail.vue'
 import TeamDetail from './components/TeamDetail.vue'
 import Toast from './components/Toast.vue'
 import { useAuth } from './composables/useAuth'
 import { useSavedFilters } from './composables/useSavedFilters'
-import { refreshData as apiRefreshData, getBoards, getDashboardSummary, getSprintsForBoard, getSprintIssues } from './services/api'
+import {
+  refreshData as apiRefreshData,
+  getBoards,
+  getDashboardSummary,
+  getSprintsForBoard,
+  getSprintIssues,
+  getProjects,
+  getOrgSummary,
+  getProjectSummary
+} from './services/api'
 
 export default {
   name: 'App',
@@ -201,6 +245,8 @@ export default {
     FilterEditor,
     FilterSelector,
     LoadingOverlay,
+    OrgDashboard,
+    ProjectDetail,
     TeamDetail,
     Toast
   },
@@ -221,7 +267,16 @@ export default {
   },
   data() {
     return {
-      currentView: 'dashboard',
+      currentView: 'org-dashboard',
+      // Multi-project state
+      orgName: 'AI Engineering',
+      projects: [],
+      orgSummary: null,
+      projectSummaries: {},
+      selectedProject: null,
+      selectedProjectSummary: null,
+      isMultiProject: false,
+      // Board/team state
       boards: [],
       boardSprintData: {},
       selectedTeam: null,
@@ -275,17 +330,98 @@ export default {
     async loadInitialData() {
       this.isLoading = true
       try {
+        // Load org config to determine single vs multi-project mode
+        const orgConfig = await getProjects()
+        this.orgName = orgConfig.orgName || 'AI Engineering'
+        this.projects = orgConfig.projects || []
+        this.isMultiProject = this.projects.length > 1
+
+        if (this.isMultiProject) {
+          // Multi-project mode: show org dashboard
+          this.currentView = 'org-dashboard'
+          await this.loadOrgData()
+        } else {
+          // Single project mode: show legacy dashboard directly
+          this.currentView = 'dashboard'
+          await Promise.all([this.loadBoards(), this.loadDashboardSummary()])
+        }
+      } catch (error) {
+        console.error('Failed to load initial data:', error)
+        // Fallback to single project mode
+        this.currentView = 'dashboard'
         await Promise.all([this.loadBoards(), this.loadDashboardSummary()])
-      } catch {
-        // Errors handled in individual methods
       } finally {
         this.isLoading = false
       }
     },
 
-    async loadBoards() {
+    async loadOrgData() {
       try {
-        const data = await getBoards()
+        const [orgSummary, ...projectSummaries] = await Promise.all([
+          getOrgSummary(),
+          ...this.projects.map(p => getProjectSummary(p.key).then(s => ({ key: p.key, summary: s })))
+        ])
+        this.orgSummary = orgSummary
+        for (const { key, summary } of projectSummaries) {
+          this.projectSummaries[key] = summary
+        }
+        if (orgSummary?.lastUpdated) {
+          this.lastUpdated = orgSummary.lastUpdated
+        }
+      } catch (error) {
+        console.error('Failed to load org data:', error)
+      }
+    },
+
+    async handleSelectProject(project) {
+      this.selectedProject = project
+      this.currentView = 'project-detail'
+      this.isLoading = true
+      try {
+        const [boardsData, summaryData] = await Promise.all([
+          getBoards(project.key),
+          getProjectSummary(project.key)
+        ])
+        this.boards = boardsData.boards || []
+        this.selectedProjectSummary = summaryData
+        this.boardSprintData = summaryData?.boards || {}
+        if (summaryData?.lastUpdated) {
+          this.lastUpdated = summaryData.lastUpdated
+        }
+      } catch (error) {
+        console.error('Failed to load project data:', error)
+        this.boards = []
+      } finally {
+        this.isLoading = false
+      }
+    },
+
+    handleBackToOrg() {
+      this.currentView = 'org-dashboard'
+      this.selectedProject = null
+      this.boards = []
+      this.boardSprintData = {}
+    },
+
+    handleBackFromTeamDetail() {
+      if (this.isMultiProject && this.selectedProject) {
+        this.currentView = 'project-detail'
+      } else {
+        this.currentView = 'dashboard'
+      }
+    },
+
+    handleBackFromSettings() {
+      if (this.isMultiProject) {
+        this.currentView = this.selectedProject ? 'project-detail' : 'org-dashboard'
+      } else {
+        this.currentView = 'dashboard'
+      }
+    },
+
+    async loadBoards(projectKey) {
+      try {
+        const data = await getBoards(projectKey)
         this.boards = data.boards || []
         this.lastUpdated = data.lastUpdated || null
       } catch (error) {
@@ -322,7 +458,8 @@ export default {
     async loadTeamSprints(boardId) {
       this.isTeamDetailLoading = true
       try {
-        const data = await getSprintsForBoard(boardId)
+        const projectKey = this.selectedProject?.key
+        const data = await getSprintsForBoard(boardId, { projectKey })
         this.teamSprints = data.sprints || []
 
         // Restore previously selected sprint, or default to active/most recent closed
@@ -346,7 +483,8 @@ export default {
 
     async loadSprintIssues(sprintId) {
       try {
-        const data = await getSprintIssues(sprintId)
+        const projectKey = this.selectedProject?.key
+        const data = await getSprintIssues(sprintId, { projectKey })
         this.teamSprintData = this.transformSprintData(data)
       } catch (error) {
         console.error('Failed to load sprint issues:', error)
@@ -430,7 +568,8 @@ export default {
       this.isRefreshing = true
 
       try {
-        await apiRefreshData('RHOAIENG', { hardRefresh })
+        const projectKey = this.selectedProject?.key || (this.projects.length === 1 ? this.projects[0]?.key : 'RHOAIENG')
+        await apiRefreshData(projectKey, { hardRefresh })
         this.showToast(
           hardRefresh
             ? 'Full refresh started — data will update in the background'
@@ -451,8 +590,18 @@ export default {
 
     async handleSettingsSaved() {
       this.showToast('Board settings saved')
-      this.currentView = 'dashboard'
-      await Promise.all([this.loadBoards(), this.loadDashboardSummary()])
+      if (this.isMultiProject) {
+        if (this.selectedProject) {
+          this.currentView = 'project-detail'
+          await this.handleSelectProject(this.selectedProject)
+        } else {
+          this.currentView = 'org-dashboard'
+          await this.loadOrgData()
+        }
+      } else {
+        this.currentView = 'dashboard'
+        await Promise.all([this.loadBoards(), this.loadDashboardSummary()])
+      }
     },
 
     async handleSignOut() {

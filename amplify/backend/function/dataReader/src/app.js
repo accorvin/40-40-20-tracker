@@ -67,6 +67,20 @@ async function readFromS3(key) {
 }
 
 /**
+ * Read from S3 with fallback: try namespaced path first, then flat path.
+ * Used during migration period to support both old and new key layouts.
+ */
+async function readWithFallback(project, key) {
+  if (project && project !== 'RHOAIENG') {
+    return readFromS3(`data/${project}/${key}`);
+  }
+  // Default project: try namespaced first, fall back to flat
+  const namespaced = await readFromS3(`data/RHOAIENG/${key}`);
+  if (namespaced) return namespaced;
+  return readFromS3(key);
+}
+
+/**
  * Write JSON to S3
  */
 async function writeToS3(key, data) {
@@ -85,6 +99,95 @@ async function writeToS3(key, data) {
 }
 
 /**
+ * GET /projects - Get list of configured projects
+ */
+app.get('/projects', async function(req, res) {
+  try {
+    const authHeader = req.headers.authorization;
+    const verification = await verifyFirebaseToken(authHeader);
+
+    if (!verification.valid) {
+      return res.status(401).json({ error: verification.error });
+    }
+
+    console.log(`Reading projects config (user: ${verification.email})`);
+
+    const data = await readFromS3('config/orgs.json');
+
+    if (!data) {
+      // Fallback: return single default project
+      return res.json({
+        orgName: 'AI Engineering',
+        projects: [{ key: 'RHOAIENG', name: 'OpenShift AI Engineering', pillar: 'OpenShift AI' }]
+      });
+    }
+
+    res.json(data);
+
+  } catch (error) {
+    console.error('Read projects error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /org-summary - Get org-wide allocation summary
+ */
+app.get('/org-summary', async function(req, res) {
+  try {
+    const authHeader = req.headers.authorization;
+    const verification = await verifyFirebaseToken(authHeader);
+
+    if (!verification.valid) {
+      return res.status(401).json({ error: verification.error });
+    }
+
+    console.log(`Reading org summary (user: ${verification.email})`);
+
+    const data = await readFromS3('data/org-summary.json');
+
+    if (!data) {
+      return res.json({ lastUpdated: null, totalPoints: 0, projectCount: 0, boardCount: 0, buckets: {} });
+    }
+
+    res.json(data);
+
+  } catch (error) {
+    console.error('Read org summary error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /projects/:projectKey/summary - Get project-level dashboard summary
+ */
+app.get('/projects/:projectKey/summary', async function(req, res) {
+  try {
+    const authHeader = req.headers.authorization;
+    const verification = await verifyFirebaseToken(authHeader);
+
+    if (!verification.valid) {
+      return res.status(401).json({ error: verification.error });
+    }
+
+    const { projectKey } = req.params;
+    console.log(`Reading project summary for ${projectKey} (user: ${verification.email})`);
+
+    const data = await readWithFallback(projectKey, 'dashboard-summary.json');
+
+    if (!data) {
+      return res.json({ lastUpdated: null, boards: {} });
+    }
+
+    res.json(data);
+
+  } catch (error) {
+    console.error(`Read project summary error for ${req.params.projectKey}:`, error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
  * GET /boards - Get list of boards
  */
 app.get('/boards', async function(req, res) {
@@ -96,16 +199,17 @@ app.get('/boards', async function(req, res) {
       return res.status(401).json({ error: verification.error });
     }
 
-    console.log(`Reading boards (user: ${verification.email})`);
+    const project = req.query.project || null;
+    console.log(`Reading boards${project ? ` for project ${project}` : ''} (user: ${verification.email})`);
 
-    const data = await readFromS3('boards.json');
+    const data = await readWithFallback(project, 'boards.json');
 
     if (!data) {
       return res.json({ boards: [], lastUpdated: null });
     }
 
     // Merge with team config for display names
-    const teamsData = await readFromS3('teams.json');
+    const teamsData = await readWithFallback(project, 'teams.json');
     if (teamsData && teamsData.teams) {
       const teamMap = new Map(teamsData.teams.map(t => [t.boardId, t]));
       data.boards = data.boards
@@ -141,9 +245,10 @@ app.get('/boards/:boardId/sprints', async function(req, res) {
     }
 
     const { boardId } = req.params;
+    const project = req.query.project || null;
     console.log(`Reading sprints for board ${boardId} (user: ${verification.email})`);
 
-    const data = await readFromS3(`sprints/board-${boardId}.json`);
+    const data = await readWithFallback(project, `sprints/board-${boardId}.json`);
 
     if (!data) {
       return res.json({ sprints: [] });
@@ -170,9 +275,10 @@ app.get('/sprints/:sprintId/issues', async function(req, res) {
     }
 
     const { sprintId } = req.params;
+    const project = req.query.project || null;
     console.log(`Reading issues for sprint ${sprintId} (user: ${verification.email})`);
 
-    const data = await readFromS3(`sprints/${sprintId}.json`);
+    const data = await readWithFallback(project, `sprints/${sprintId}.json`);
 
     if (!data) {
       return res.status(500).json({
@@ -200,9 +306,10 @@ app.get('/teams', async function(req, res) {
       return res.status(401).json({ error: verification.error });
     }
 
+    const project = req.query.project || null;
     console.log(`Reading teams config (user: ${verification.email})`);
 
-    const data = await readFromS3('teams.json');
+    const data = await readWithFallback(project, 'teams.json');
 
     if (!data) {
       return res.json({ teams: [] });
@@ -236,12 +343,15 @@ app.post('/teams', async function(req, res) {
       });
     }
 
+    const project = req.query.project || null;
+    const key = (project && project !== 'RHOAIENG') ? `data/${project}/teams.json` : 'teams.json';
+
     console.log(`Saving ${teams.length} teams config (user: ${verification.email})`);
 
     // Mark all teams as manually configured to prevent auto-disable on next discover
     const teamsWithManualFlag = teams.map(t => ({ ...t, manuallyConfigured: true }));
 
-    await writeToS3('teams.json', { teams: teamsWithManualFlag });
+    await writeToS3(key, { teams: teamsWithManualFlag });
 
     res.json({ success: true, teams: teamsWithManualFlag });
 
@@ -263,9 +373,10 @@ app.get('/dashboard-summary', async function(req, res) {
       return res.status(401).json({ error: verification.error });
     }
 
+    const project = req.query.project || null;
     console.log(`Reading dashboard summary (user: ${verification.email})`);
 
-    const data = await readFromS3('dashboard-summary.json');
+    const data = await readWithFallback(project, 'dashboard-summary.json');
 
     if (!data) {
       return res.json({ lastUpdated: null, boards: {} });
@@ -286,6 +397,9 @@ app.options('/sprints', function(req, res) { res.status(200).end(); });
 app.options('/sprints/*', function(req, res) { res.status(200).end(); });
 app.options('/teams', function(req, res) { res.status(200).end(); });
 app.options('/dashboard-summary', function(req, res) { res.status(200).end(); });
+app.options('/projects', function(req, res) { res.status(200).end(); });
+app.options('/projects/*', function(req, res) { res.status(200).end(); });
+app.options('/org-summary', function(req, res) { res.status(200).end(); });
 
 app.listen(3000, function() {
   console.log("dataReader app started");

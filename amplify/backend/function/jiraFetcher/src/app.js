@@ -16,7 +16,8 @@ const { SSMClient, GetParameterCommand } = require('@aws-sdk/client-ssm');
 const fetch = require('node-fetch');
 const { verifyFirebaseToken } = require('./verifyToken');
 const { createJiraClient } = require('./shared/jira-client');
-const { discoverBoards, performRefresh: sharedPerformRefresh } = require('./shared/orchestration');
+const { discoverBoards, performRefresh: sharedPerformRefresh, performMultiProjectRefresh: sharedMultiProjectRefresh } = require('./shared/orchestration');
+const { getStoragePrefix, createPrefixedStorage } = require('./shared/config');
 
 const app = express();
 app.use(bodyParser.json());
@@ -170,6 +171,26 @@ const orchestrationDeps = {
 };
 
 /**
+ * Read org configuration from S3.
+ */
+async function readOrgConfig() {
+  return readFromS3('config/orgs.json');
+}
+
+/**
+ * Get orchestration deps with storage optionally prefixed for a project.
+ */
+function getDepsForProject(projectKey) {
+  if (!projectKey || projectKey === 'RHOAIENG') {
+    // Default project: use unprefixed storage for backward compatibility
+    return orchestrationDeps;
+  }
+  const prefix = getStoragePrefix(projectKey);
+  const { read, write } = createPrefixedStorage(prefix, readFromS3, uploadToS3);
+  return { ...jiraClient, readStorage: read, writeStorage: write };
+}
+
+/**
  * POST /discover-boards - Fetch boards from Jira and save to S3 without processing sprints
  */
 app.post('/discover-boards', async function(req, res) {
@@ -182,10 +203,11 @@ app.post('/discover-boards', async function(req, res) {
     }
 
     const projectKey = req.body.projectKey || 'RHOAIENG';
+    const deps = getDepsForProject(projectKey);
 
-    console.log(`Discovering boards (user: ${verification.email})`);
+    console.log(`Discovering boards for ${projectKey} (user: ${verification.email})`);
 
-    const result = await discoverBoards({ ...orchestrationDeps, projectKey });
+    const result = await discoverBoards({ ...deps, projectKey });
 
     res.json(result);
   } catch (error) {
@@ -199,7 +221,21 @@ app.post('/discover-boards', async function(req, res) {
  * Called from both Express handler and direct Lambda invocation (index.js).
  */
 async function performRefresh({ projectKey, hardRefresh }) {
-  return sharedPerformRefresh({ ...orchestrationDeps, projectKey, hardRefresh });
+  const deps = getDepsForProject(projectKey);
+  return sharedPerformRefresh({ ...deps, projectKey, hardRefresh });
+}
+
+/**
+ * Multi-project refresh with Lambda's S3/Jira dependencies pre-filled.
+ */
+async function performMultiProjectRefresh({ projects, hardRefresh }) {
+  return sharedMultiProjectRefresh({
+    projects,
+    hardRefresh,
+    ...jiraClient,
+    readStorage: readFromS3,
+    writeStorage: uploadToS3
+  });
 }
 
 /**
@@ -265,3 +301,5 @@ app.listen(3000, function() {
 
 module.exports = app;
 module.exports.performRefresh = performRefresh;
+module.exports.performMultiProjectRefresh = performMultiProjectRefresh;
+module.exports.readOrgConfig = readOrgConfig;

@@ -15,7 +15,8 @@ const express = require('express');
 const fetch = require('node-fetch');
 const { readFromStorage, writeToStorage } = require('./storage');
 const { createJiraClient } = require('../amplify/backend/function/jiraFetcher/src/shared/jira-client');
-const { discoverBoards, performRefresh } = require('../amplify/backend/function/jiraFetcher/src/shared/orchestration');
+const { discoverBoards, performRefresh, performMultiProjectRefresh } = require('../amplify/backend/function/jiraFetcher/src/shared/orchestration');
+const { getStoragePrefix, createPrefixedStorage } = require('../amplify/backend/function/jiraFetcher/src/shared/config');
 
 const app = express();
 app.use(express.json());
@@ -98,14 +99,45 @@ const orchestrationDeps = {
   writeStorage: writeToStorage
 };
 
+// ─── Multi-project helpers ───
+
+function readOrgConfig() {
+  return readFromStorage('config/orgs.json');
+}
+
+/**
+ * Read from storage with fallback: try namespaced path first, then flat path.
+ */
+function readWithFallback(project, key) {
+  if (project && project !== 'RHOAIENG') {
+    return readFromStorage(`data/${project}/${key}`);
+  }
+  const namespaced = readFromStorage(`data/RHOAIENG/${key}`);
+  if (namespaced) return namespaced;
+  return readFromStorage(key);
+}
+
+/**
+ * Get orchestration deps with storage optionally prefixed for a project.
+ */
+function getDepsForProject(projectKey) {
+  if (!projectKey || projectKey === 'RHOAIENG') {
+    return orchestrationDeps;
+  }
+  const prefix = getStoragePrefix(projectKey);
+  const { read, write } = createPrefixedStorage(prefix, readFromStorage, writeToStorage);
+  return { ...jiraClient, readStorage: read, writeStorage: write };
+}
+
 // ─── Routes: jiraFetcher ───
 
 app.post('/api/discover-boards', async function(req, res) {
   try {
     const projectKey = req.body.projectKey || 'RHOAIENG';
+    const deps = getDepsForProject(projectKey);
     console.log(`\nDiscovering boards for project ${projectKey}`);
 
-    const result = await discoverBoards({ ...orchestrationDeps, projectKey });
+    const result = await discoverBoards({ ...deps, projectKey });
 
     res.json(result);
   } catch (error) {
@@ -120,8 +152,9 @@ app.post('/api/refresh', function(req, res) {
 
   res.json({ status: 'started' });
 
+  const deps = getDepsForProject(projectKey);
   setImmediate(() => {
-    performRefresh({ ...orchestrationDeps, projectKey, hardRefresh }).catch(error => {
+    performRefresh({ ...deps, projectKey, hardRefresh }).catch(error => {
       console.error('Background refresh error:', error);
     });
   });
@@ -129,16 +162,66 @@ app.post('/api/refresh', function(req, res) {
 
 // ─── Routes: dataReader ───
 
+app.get('/api/projects', function(req, res) {
+  try {
+    const data = readOrgConfig();
+
+    if (!data) {
+      return res.json({
+        orgName: 'AI Engineering',
+        projects: [{ key: 'RHOAIENG', name: 'OpenShift AI Engineering', pillar: 'OpenShift AI' }]
+      });
+    }
+
+    res.json(data);
+  } catch (error) {
+    console.error('Read projects error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/org-summary', function(req, res) {
+  try {
+    const data = readFromStorage('data/org-summary.json');
+
+    if (!data) {
+      return res.json({ lastUpdated: null, totalPoints: 0, projectCount: 0, boardCount: 0, buckets: {} });
+    }
+
+    res.json(data);
+  } catch (error) {
+    console.error('Read org summary error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/projects/:projectKey/summary', function(req, res) {
+  try {
+    const { projectKey } = req.params;
+    const data = readWithFallback(projectKey, 'dashboard-summary.json');
+
+    if (!data) {
+      return res.json({ lastUpdated: null, boards: {} });
+    }
+
+    res.json(data);
+  } catch (error) {
+    console.error('Read project summary error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.get('/api/boards', function(req, res) {
   try {
-    const data = readFromStorage('boards.json');
+    const project = req.query.project || null;
+    const data = readWithFallback(project, 'boards.json');
 
     if (!data) {
       return res.json({ boards: [], lastUpdated: null });
     }
 
     // Merge with team config
-    const teamsData = readFromStorage('teams.json');
+    const teamsData = readWithFallback(project, 'teams.json');
     if (teamsData && teamsData.teams) {
       const teamMap = new Map(teamsData.teams.map(t => [t.boardId, t]));
       data.boards = data.boards
@@ -163,7 +246,8 @@ app.get('/api/boards', function(req, res) {
 app.get('/api/boards/:boardId/sprints', function(req, res) {
   try {
     const { boardId } = req.params;
-    const data = readFromStorage(`sprints/board-${boardId}.json`);
+    const project = req.query.project || null;
+    const data = readWithFallback(project, `sprints/board-${boardId}.json`);
 
     if (!data) {
       return res.json({ sprints: [] });
@@ -179,7 +263,8 @@ app.get('/api/boards/:boardId/sprints', function(req, res) {
 app.get('/api/sprints/:sprintId/issues', function(req, res) {
   try {
     const { sprintId } = req.params;
-    const data = readFromStorage(`sprints/${sprintId}.json`);
+    const project = req.query.project || null;
+    const data = readWithFallback(project, `sprints/${sprintId}.json`);
 
     if (!data) {
       return res.status(500).json({
@@ -196,7 +281,8 @@ app.get('/api/sprints/:sprintId/issues', function(req, res) {
 
 app.get('/api/teams', function(req, res) {
   try {
-    const data = readFromStorage('teams.json');
+    const project = req.query.project || null;
+    const data = readWithFallback(project, 'teams.json');
     if (!data) {
       return res.json({ teams: [] });
     }
@@ -214,7 +300,10 @@ app.post('/api/teams', function(req, res) {
       return res.status(400).json({ error: 'Request must include "teams" array' });
     }
 
-    writeToStorage('teams.json', { teams });
+    const project = req.query.project || null;
+    const key = (project && project !== 'RHOAIENG') ? `data/${project}/teams.json` : 'teams.json';
+
+    writeToStorage(key, { teams });
     res.json({ success: true, teams });
   } catch (error) {
     console.error('Save teams error:', error);
@@ -224,18 +313,19 @@ app.post('/api/teams', function(req, res) {
 
 app.get('/api/dashboard-summary', function(req, res) {
   try {
-    const data = readFromStorage('dashboard-summary.json');
+    const project = req.query.project || null;
+    const data = readWithFallback(project, 'dashboard-summary.json');
     if (data) {
       return res.json(data);
     }
 
     // Build dashboard summary on-the-fly from existing sprint data
-    const boardsData = readFromStorage('boards.json');
+    const boardsData = readWithFallback(project, 'boards.json');
     if (!boardsData || !boardsData.boards) {
       return res.json({ lastUpdated: null, boards: {} });
     }
 
-    const teamsData = readFromStorage('teams.json');
+    const teamsData = readWithFallback(project, 'teams.json');
     const enabledBoardIds = new Set(
       teamsData?.teams?.filter(t => t.enabled !== false).map(t => t.boardId) || boardsData.boards.map(b => b.id)
     );
@@ -245,7 +335,7 @@ app.get('/api/dashboard-summary', function(req, res) {
     for (const board of boardsData.boards) {
       if (!enabledBoardIds.has(board.id)) continue;
 
-      const boardSprints = readFromStorage(`sprints/board-${board.id}.json`);
+      const boardSprints = readWithFallback(project, `sprints/board-${board.id}.json`);
       if (!boardSprints?.sprints?.length) continue;
 
       // Pick active sprint, or most recent closed
@@ -256,7 +346,7 @@ app.get('/api/dashboard-summary', function(req, res) {
 
       if (!dashSprint) continue;
 
-      const sprintData = readFromStorage(`sprints/${dashSprint.id}.json`);
+      const sprintData = readWithFallback(project, `sprints/${dashSprint.id}.json`);
       if (!sprintData?.summary) continue;
 
       summary.boards[board.id] = {

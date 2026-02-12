@@ -125,10 +125,98 @@ function determineStaleness(sprints, now = new Date()) {
   return { stale: elapsed > STALE_THRESHOLD_MS, lastSprintEndDate };
 }
 
+/**
+ * Create a zeroed buckets object.
+ */
+function emptyBuckets() {
+  return {
+    'tech-debt-quality': { points: 0, issueCount: 0, completedPoints: 0 },
+    'new-features': { points: 0, issueCount: 0, completedPoints: 0 },
+    'learning-enablement': { points: 0, issueCount: 0, completedPoints: 0 },
+    'uncategorized': { points: 0, issueCount: 0, completedPoints: 0 }
+  };
+}
+
+/**
+ * Aggregate bucket data from a source summary into a target buckets object (mutates target).
+ */
+function addBuckets(target, source) {
+  for (const key of Object.keys(target)) {
+    const s = source[key];
+    if (!s) continue;
+    target[key].points += s.points || 0;
+    target[key].issueCount += s.issueCount || 0;
+    target[key].completedPoints += s.completedPoints || 0;
+  }
+}
+
+/**
+ * Build a project-level summary by aggregating across board summaries.
+ * @param {Array} boardSummaries - Array of sprint summary objects (from buildSprintSummary)
+ * @returns {object} Aggregated summary with totalPoints, boardCount, buckets, etc.
+ */
+function buildProjectSummary(boardSummaries) {
+  const buckets = emptyBuckets();
+  let totalPoints = 0;
+  let estimatedIssueCount = 0;
+  let unestimatedIssueCount = 0;
+
+  for (const summary of boardSummaries) {
+    totalPoints += summary.totalPoints || 0;
+    estimatedIssueCount += summary.estimatedIssueCount || 0;
+    unestimatedIssueCount += summary.unestimatedIssueCount || 0;
+    if (summary.buckets) {
+      addBuckets(buckets, summary.buckets);
+    }
+  }
+
+  return {
+    totalPoints,
+    boardCount: boardSummaries.length,
+    estimatedIssueCount,
+    unestimatedIssueCount,
+    buckets
+  };
+}
+
+/**
+ * Build an org-level summary by aggregating across project summaries.
+ * @param {Array} projectSummaries - Array of project summary objects (from buildProjectSummary)
+ * @returns {object} Aggregated summary with totalPoints, projectCount, boardCount, buckets, etc.
+ */
+function buildOrgSummary(projectSummaries) {
+  const buckets = emptyBuckets();
+  let totalPoints = 0;
+  let boardCount = 0;
+  let estimatedIssueCount = 0;
+  let unestimatedIssueCount = 0;
+
+  for (const summary of projectSummaries) {
+    totalPoints += summary.totalPoints || 0;
+    boardCount += summary.boardCount || 0;
+    estimatedIssueCount += summary.estimatedIssueCount || 0;
+    unestimatedIssueCount += summary.unestimatedIssueCount || 0;
+    if (summary.buckets) {
+      addBuckets(buckets, summary.buckets);
+    }
+  }
+
+  return {
+    totalPoints,
+    projectCount: projectSummaries.length,
+    boardCount,
+    estimatedIssueCount,
+    unestimatedIssueCount,
+    buckets
+  };
+}
+
 module.exports = {
   STALE_THRESHOLD_MS,
   classifyIssue,
   buildSprintSummary,
+  buildProjectSummary,
+  buildOrgSummary,
   getLatestSprintEndDate,
   determineStaleness
 };

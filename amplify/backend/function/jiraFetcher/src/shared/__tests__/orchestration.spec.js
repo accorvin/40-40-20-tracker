@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect, vi } from 'vitest';
-import { discoverBoards, performRefresh } from '../orchestration.js';
+import { discoverBoards, performRefresh, processBoard, performMultiProjectRefresh } from '../orchestration.js';
 
 function makeDeps(overrides = {}) {
   return {
@@ -272,5 +272,166 @@ describe('performRefresh', () => {
     expect(indexCall).toBeDefined();
     expect(indexCall[1].sprints).toHaveLength(1);
     expect(indexCall[1].sprints[0].id).toBe(100);
+  });
+});
+
+describe('processBoard', () => {
+  it('processes a single board and returns dashboard sprint result', async () => {
+    const readStorage = vi.fn().mockReturnValue(null);
+    const writeStorage = vi.fn();
+    const fetchSprints = vi.fn().mockResolvedValue([
+      { id: 100, name: 'Sprint 1', state: 'active', startDate: '2025-06-01', endDate: '2025-06-14', completeDate: null }
+    ]);
+    const fetchSprintIssues = vi.fn().mockResolvedValue([
+      { key: 'P-1', summary: 'Bug', activityType: 'Tech Debt & Quality', storyPoints: 3, resolution: { name: 'Done' } }
+    ]);
+
+    const result = await processBoard({
+      board: { id: 1, name: 'Board A' },
+      hardRefresh: false,
+      fetchSprints,
+      fetchSprintIssues,
+      readStorage,
+      writeStorage
+    });
+
+    expect(result.board.id).toBe(1);
+    expect(result.sprintResults).toHaveLength(1);
+    expect(result.dashboardSprint).toBeDefined();
+    expect(result.dashboardSprintResult.summary.totalPoints).toBe(3);
+
+    // Sprint data written
+    const sprintCall = writeStorage.mock.calls.find(c => c[0] === 'sprints/100.json');
+    expect(sprintCall).toBeDefined();
+  });
+
+  it('uses cached closed sprint data when not hard refresh', async () => {
+    const cachedSprint = {
+      issues: [{ key: 'P-1' }],
+      summary: { totalPoints: 5, buckets: {} }
+    };
+    const readStorage = vi.fn().mockImplementation((key) => {
+      if (key === 'sprints/100.json') return cachedSprint;
+      return null;
+    });
+    const writeStorage = vi.fn();
+    const fetchSprints = vi.fn().mockResolvedValue([
+      { id: 100, name: 'Sprint 1', state: 'closed', startDate: '2025-05-01', endDate: '2025-05-14', completeDate: '2025-05-15' }
+    ]);
+    const fetchSprintIssues = vi.fn();
+
+    await processBoard({
+      board: { id: 1, name: 'Board A' },
+      hardRefresh: false,
+      fetchSprints,
+      fetchSprintIssues,
+      readStorage,
+      writeStorage
+    });
+
+    expect(fetchSprintIssues).not.toHaveBeenCalled();
+  });
+});
+
+describe('performMultiProjectRefresh', () => {
+  it('processes multiple projects and writes rollup summaries', async () => {
+    const readStorage = vi.fn().mockReturnValue(null);
+    const writeStorage = vi.fn();
+    const fetchBoards = vi.fn().mockResolvedValue([
+      { id: 1, name: 'Board A' }
+    ]);
+    const fetchSprints = vi.fn().mockResolvedValue([
+      { id: 100, name: 'Sprint 1', state: 'active', startDate: '2025-06-01', endDate: '2025-06-14', completeDate: null }
+    ]);
+    const fetchSprintIssues = vi.fn().mockResolvedValue([
+      { key: 'P-1', summary: 'Bug', activityType: 'Tech Debt & Quality', storyPoints: 3, resolution: null }
+    ]);
+
+    const result = await performMultiProjectRefresh({
+      projects: [
+        { key: 'PROJ1', name: 'Project 1' },
+        { key: 'PROJ2', name: 'Project 2' }
+      ],
+      hardRefresh: false,
+      fetchBoards,
+      fetchSprints,
+      fetchSprintIssues,
+      readStorage,
+      writeStorage
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.projects).toHaveLength(2);
+
+    // Each project writes its data with prefixed keys
+    const proj1BoardsCall = writeStorage.mock.calls.find(c => c[0] === 'data/PROJ1/boards.json');
+    expect(proj1BoardsCall).toBeDefined();
+    const proj2BoardsCall = writeStorage.mock.calls.find(c => c[0] === 'data/PROJ2/boards.json');
+    expect(proj2BoardsCall).toBeDefined();
+
+    // Org summary written
+    const orgSummaryCall = writeStorage.mock.calls.find(c => c[0] === 'data/org-summary.json');
+    expect(orgSummaryCall).toBeDefined();
+    expect(orgSummaryCall[1].projectCount).toBe(2);
+  });
+
+  it('writes per-project summary files', async () => {
+    const readStorage = vi.fn().mockReturnValue(null);
+    const writeStorage = vi.fn();
+    const fetchBoards = vi.fn().mockResolvedValue([
+      { id: 1, name: 'Board A' }
+    ]);
+    const fetchSprints = vi.fn().mockResolvedValue([
+      { id: 100, name: 'Sprint 1', state: 'active', startDate: '2025-06-01', endDate: '2025-06-14', completeDate: null }
+    ]);
+    const fetchSprintIssues = vi.fn().mockResolvedValue([
+      { key: 'P-1', summary: 'Feature', activityType: 'New Features', storyPoints: 5, resolution: null }
+    ]);
+
+    await performMultiProjectRefresh({
+      projects: [{ key: 'PROJ1', name: 'Project 1' }],
+      hardRefresh: false,
+      fetchBoards,
+      fetchSprints,
+      fetchSprintIssues,
+      readStorage,
+      writeStorage
+    });
+
+    // Project-level dashboard summary written
+    const projSummaryCall = writeStorage.mock.calls.find(c => c[0] === 'data/PROJ1/dashboard-summary.json');
+    expect(projSummaryCall).toBeDefined();
+    expect(projSummaryCall[1].boards).toBeDefined();
+  });
+
+  it('continues processing if one project fails', async () => {
+    let callCount = 0;
+    const fetchBoards = vi.fn().mockImplementation(() => {
+      callCount++;
+      if (callCount === 1) throw new Error('Jira error');
+      return [{ id: 1, name: 'Board A' }];
+    });
+    const readStorage = vi.fn().mockReturnValue(null);
+    const writeStorage = vi.fn();
+    const fetchSprints = vi.fn().mockResolvedValue([]);
+    const fetchSprintIssues = vi.fn().mockResolvedValue([]);
+
+    const result = await performMultiProjectRefresh({
+      projects: [
+        { key: 'FAIL_PROJ', name: 'Will Fail' },
+        { key: 'OK_PROJ', name: 'Will Succeed' }
+      ],
+      hardRefresh: false,
+      fetchBoards,
+      fetchSprints,
+      fetchSprintIssues,
+      readStorage,
+      writeStorage
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.projects).toHaveLength(2);
+    expect(result.projects[0].success).toBe(false);
+    expect(result.projects[1].success).toBe(true);
   });
 });
