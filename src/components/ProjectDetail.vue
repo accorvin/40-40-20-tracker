@@ -22,6 +22,7 @@
             {{ totalPoints }} pts across {{ boardCount }} {{ boardCount === 1 ? 'board' : 'boards' }}
           </span>
         </div>
+        <p class="text-xs text-gray-400 mb-2">Aggregated from each board's currently active sprint</p>
         <AllocationBar v-if="aggregatedBuckets && totalPoints > 0" :buckets="aggregatedBuckets" :totalPoints="totalPoints" />
       </div>
     </div>
