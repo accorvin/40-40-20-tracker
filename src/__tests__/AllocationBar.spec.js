@@ -41,17 +41,20 @@ describe('AllocationBar', () => {
     expect(featureSegment.attributes('style')).toContain('width: 56%')
   })
 
-  it('shows percentage labels on segments >= 10%', () => {
+  it('shows inline percentage labels on segments >= 10%', () => {
     const wrapper = mount(AllocationBar, {
       props: { buckets: mockBuckets, totalPoints: 90 }
     })
 
-    // Both segments are > 10% so labels should appear
-    expect(wrapper.text()).toContain('44%')
-    expect(wrapper.text()).toContain('56%')
+    // Both segments are > 10% so labels should appear inline
+    const techDebtSegment = wrapper.find('[data-testid="segment-tech-debt-quality"]')
+    expect(techDebtSegment.text()).toContain('44%')
+
+    const featureSegment = wrapper.find('[data-testid="segment-new-features"]')
+    expect(featureSegment.text()).toContain('56%')
   })
 
-  it('hides percentage labels on segments < 10%', () => {
+  it('hides inline percentage labels on segments < 10%', () => {
     const smallBuckets = {
       'tech-debt-quality': { points: 5, count: 1 },
       'new-features': { points: 90, count: 10 },
@@ -63,9 +66,40 @@ describe('AllocationBar', () => {
       props: { buckets: smallBuckets, totalPoints: 100 }
     })
 
-    // 5% segments should not show labels
+    // 5% segments should not show inline labels
     const techDebtSegment = wrapper.find('[data-testid="segment-tech-debt-quality"]')
-    expect(techDebtSegment.text()).toBe('')
+    const spans = techDebtSegment.findAll('span')
+    expect(spans).toHaveLength(0)
+  })
+
+  it('shows hover tooltip with name and percentage on each segment', () => {
+    const wrapper = mount(AllocationBar, {
+      props: { buckets: mockBuckets, totalPoints: 90 }
+    })
+
+    const techDebtTooltip = wrapper.find('[data-testid="segment-tech-debt-quality"] [data-testid="tooltip"]')
+    expect(techDebtTooltip.text()).toContain('Tech Debt & Quality: 44%')
+
+    const featureTooltip = wrapper.find('[data-testid="segment-new-features"] [data-testid="tooltip"]')
+    expect(featureTooltip.text()).toContain('New Features: 56%')
+  })
+
+  it('shows hover tooltip even on small segments', () => {
+    const smallBuckets = {
+      'tech-debt-quality': { points: 5, count: 1 },
+      'new-features': { points: 90, count: 10 },
+      'learning-enablement': { points: 5, count: 1 },
+      'uncategorized': { points: 0, count: 0 }
+    }
+
+    const wrapper = mount(AllocationBar, {
+      props: { buckets: smallBuckets, totalPoints: 100 }
+    })
+
+    // 5% segments should still have tooltips
+    const techDebtTooltip = wrapper.find('[data-testid="segment-tech-debt-quality"] [data-testid="tooltip"]')
+    expect(techDebtTooltip.exists()).toBe(true)
+    expect(techDebtTooltip.text()).toContain('Tech Debt & Quality: 5%')
   })
 
   it('handles 0 total points gracefully', () => {
@@ -92,7 +126,7 @@ describe('AllocationBar', () => {
     expect(markers.length).toBe(2) // 40% and 80% markers
   })
 
-  it('shows tooltip on hover with bucket name, points, and percentage', () => {
+  it('shows title attribute with bucket name, points, and percentage', () => {
     const wrapper = mount(AllocationBar, {
       props: { buckets: mockBuckets, totalPoints: 90 }
     })
@@ -118,5 +152,8 @@ describe('AllocationBar', () => {
 
     const learningSegment = wrapper.find('[data-testid="segment-learning-enablement"]')
     expect(learningSegment.attributes('title')).toBe('Learning & Enablement: 20 pts (20%)')
+
+    const learningTooltip = wrapper.find('[data-testid="segment-learning-enablement"] [data-testid="tooltip"]')
+    expect(learningTooltip.text()).toContain('Learning & Enablement: 20%')
   })
 })
