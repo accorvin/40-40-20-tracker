@@ -390,6 +390,46 @@ app.get('/dashboard-summary', async function(req, res) {
   }
 });
 
+/**
+ * POST /projects - Save project configuration
+ */
+app.post('/projects', async function(req, res) {
+  try {
+    const authHeader = req.headers.authorization;
+    const verification = await verifyFirebaseToken(authHeader);
+
+    if (!verification.valid) {
+      return res.status(401).json({ error: verification.error });
+    }
+
+    const { orgName, projects } = req.body;
+
+    if (!projects || !Array.isArray(projects)) {
+      return res.status(400).json({
+        error: 'Request must include "projects" array'
+      });
+    }
+
+    for (const project of projects) {
+      if (!project.key || !project.name || !project.pillar) {
+        return res.status(400).json({
+          error: 'Each project must have "key", "name", and "pillar"'
+        });
+      }
+    }
+
+    console.log(`Saving ${projects.length} projects config (user: ${verification.email})`);
+
+    await writeToS3('config/orgs.json', { orgName: orgName || 'AI Engineering', projects });
+
+    res.json({ success: true, projects });
+
+  } catch (error) {
+    console.error('Save projects error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Handle OPTIONS for CORS preflight
 app.options('/boards', function(req, res) { res.status(200).end(); });
 app.options('/boards/*', function(req, res) { res.status(200).end(); });

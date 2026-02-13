@@ -357,6 +357,29 @@ app.post('/api/teams', function(req, res) {
   }
 });
 
+app.post('/api/projects', function(req, res) {
+  try {
+    const { orgName, projects } = req.body;
+    if (!projects || !Array.isArray(projects)) {
+      return res.status(400).json({ error: 'Request must include "projects" array' });
+    }
+
+    for (const project of projects) {
+      if (!project.key || !project.name || !project.pillar) {
+        return res.status(400).json({
+          error: 'Each project must have "key", "name", and "pillar"'
+        });
+      }
+    }
+
+    writeToStorage('config/orgs.json', { orgName: orgName || 'AI Engineering', projects });
+    res.json({ success: true, projects });
+  } catch (error) {
+    console.error('Save projects error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.get('/api/dashboard-summary', function(req, res) {
   try {
     const project = req.query.project || null;

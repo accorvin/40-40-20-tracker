@@ -392,6 +392,43 @@ export async function getProjectSummary(projectKey) {
 }
 
 /**
+ * Save project configuration
+ * @param {object} params
+ * @param {string} params.orgName - Organization name
+ * @param {Array} params.projects - Array of project objects with key, name, pillar
+ * @returns {Promise<{success: boolean}>}
+ */
+export async function saveProjects({ orgName, projects }) {
+  try {
+    const token = await getAuthToken()
+
+    const response = await fetch(`${API_ENDPOINT}/projects`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ orgName, projects })
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json()
+
+      if (response.status === 401) {
+        throw new Error('Authentication failed. Please sign in again.')
+      }
+
+      throw new Error(errorData.error || `HTTP ${response.status}`)
+    }
+
+    return await response.json()
+  } catch (error) {
+    console.error('Save projects error:', error)
+    throw error
+  }
+}
+
+/**
  * Save team configuration to S3
  * @param {Array} teams - Array of team config objects
  * @returns {Promise<{success: boolean}>}
