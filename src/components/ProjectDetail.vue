@@ -17,7 +17,7 @@
     <div v-if="projectSummary && projectSummary.lastUpdated" class="mb-6">
       <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
         <div class="flex items-center justify-between mb-2">
-          <h2 class="text-lg font-semibold text-gray-900">{{ project.name }}</h2>
+          <h2 class="text-lg font-semibold text-gray-900">{{ project.name }} — Project Overview</h2>
           <span v-if="totalPoints > 0" class="text-sm text-gray-500">
             {{ totalPoints }} pts across {{ boardCount }} {{ boardCount === 1 ? 'board' : 'boards' }}
           </span>
@@ -57,7 +57,15 @@
       @delete-filter="$emit('delete-filter', $event)"
     />
 
-    <!-- Board cards grid -->
+    <!-- Section divider -->
+    <div class="flex items-center gap-3 mb-4 mt-2">
+      <div class="flex-1 border-t border-gray-200"></div>
+      <span class="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+        Boards{{ boards.length > 0 ? ` (${boards.length})` : '' }}
+      </span>
+      <div class="flex-1 border-t border-gray-200"></div>
+    </div>
+
     <div v-if="boards.length === 0" class="text-center py-12 text-gray-500">
       <p class="text-lg">No boards found for this project.</p>
       <p>Click Refresh to fetch boards from Jira.</p>

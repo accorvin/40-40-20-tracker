@@ -1,9 +1,14 @@
 <template>
   <div
-    class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 hover:shadow-md hover:border-primary-300 transition-all cursor-pointer"
+    class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 hover:shadow-md hover:border-primary-300 hover:bg-primary-50 transition-all cursor-pointer group"
     @click="$emit('select-team', board)"
   >
-    <h3 class="font-semibold text-gray-900 truncate">{{ board.displayName || board.name }}</h3>
+    <div class="flex items-center justify-between">
+      <h3 class="font-semibold text-gray-900 truncate">{{ board.displayName || board.name }}</h3>
+      <svg class="h-4 w-4 text-gray-300 group-hover:text-primary-500 transition-colors shrink-0 ml-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+      </svg>
+    </div>
 
     <template v-if="sprintData">
       <div class="flex items-center gap-2 mt-1">

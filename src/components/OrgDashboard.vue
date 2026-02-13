@@ -4,7 +4,7 @@
     <div v-if="orgSummary && orgSummary.totalPoints > 0" class="mb-6">
       <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
         <div class="flex items-center justify-between mb-2">
-          <h2 class="text-lg font-semibold text-gray-900">{{ orgName }}</h2>
+          <h2 class="text-lg font-semibold text-gray-900">{{ orgName }} — Organization Overview</h2>
           <span class="text-sm text-gray-500">
             {{ orgSummary.totalPoints }} pts across {{ orgSummary.boardCount }} {{ orgSummary.boardCount === 1 ? 'board' : 'boards' }}
           </span>
@@ -33,7 +33,15 @@
       </span>
     </div>
 
-    <!-- Project cards grid -->
+    <!-- Section divider -->
+    <div class="flex items-center gap-3 mb-4 mt-2">
+      <div class="flex-1 border-t border-gray-200"></div>
+      <span class="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+        Projects{{ projects.length > 0 ? ` (${projects.length})` : '' }}
+      </span>
+      <div class="flex-1 border-t border-gray-200"></div>
+    </div>
+
     <div v-if="projects.length === 0" class="text-center py-12 text-gray-500">
       <p class="text-lg">No projects configured.</p>
     </div>
