@@ -6,9 +6,10 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { ref } from 'vue'
 import App from '../App.vue'
 import BoardSettings from '../components/BoardSettings.vue'
-import DashboardGrid from '../components/DashboardGrid.vue'
 import FilterEditor from '../components/FilterEditor.vue'
 import FilterSelector from '../components/FilterSelector.vue'
+import OrgDashboard from '../components/OrgDashboard.vue'
+import ProjectDetail from '../components/ProjectDetail.vue'
 import TeamDetail from '../components/TeamDetail.vue'
 
 // Mock useAuth composable
@@ -40,6 +41,8 @@ const localStorageMock = {
 global.localStorage = localStorageMock
 
 describe('App', () => {
+  const mockProject = { key: 'RHOAIENG', name: 'OpenShift AI Engineering', pillar: 'OpenShift AI' }
+
   const mockBoardsResponse = {
     boards: [
       { id: 1, name: 'Board Alpha', displayName: 'Team Alpha' },
@@ -48,7 +51,19 @@ describe('App', () => {
     lastUpdated: '2026-02-09T12:00:00Z'
   }
 
-  const mockDashboardSummaryResponse = {
+  const mockOrgSummaryResponse = {
+    lastUpdated: '2026-02-09T12:00:00Z',
+    totalPoints: 75,
+    boardCount: 2,
+    buckets: {
+      'tech-debt-quality': { points: 35, issueCount: 7 },
+      'new-features': { points: 40, issueCount: 11 },
+      'learning-enablement': { points: 0, issueCount: 0 },
+      'uncategorized': { points: 0, issueCount: 0 }
+    }
+  }
+
+  const mockProjectSummaryResponse = {
     lastUpdated: '2026-02-09T12:00:00Z',
     boards: {
       1: {
@@ -118,25 +133,32 @@ describe('App', () => {
 
   function setupFetchMock(overrides = {}) {
     fetch.mockImplementation((url, options) => {
+      // /projects (not /projects/KEY/summary)
       if (url.endsWith('/projects')) {
         return Promise.resolve({
           ok: true,
-          json: async () => ({
+          json: async () => overrides.projects || {
             orgName: 'AI Engineering',
-            projects: [{ key: 'RHOAIENG', name: 'OpenShift AI Engineering', pillar: 'OpenShift AI' }]
-          })
+            projects: [mockProject]
+          }
         })
       }
-      if (url.endsWith('/boards')) {
+      if (url.endsWith('/org-summary')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => overrides.orgSummary || mockOrgSummaryResponse
+        })
+      }
+      if (url.match(/\/projects\/\w+\/summary$/)) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => overrides.projectSummary || mockProjectSummaryResponse
+        })
+      }
+      if (url.includes('/boards') && !url.includes('/sprints')) {
         return Promise.resolve({
           ok: true,
           json: async () => mockBoardsResponse
-        })
-      }
-      if (url.endsWith('/dashboard-summary')) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => mockDashboardSummaryResponse
         })
       }
       if (url.endsWith('/refresh')) {
@@ -145,13 +167,13 @@ describe('App', () => {
           json: async () => ({ status: 'started' })
         })
       }
-      if (url.match(/\/boards\/\d+\/sprints$/)) {
+      if (url.match(/\/boards\/\d+\/sprints/)) {
         return Promise.resolve({
           ok: true,
           json: async () => overrides.sprints || mockSprintsResponse
         })
       }
-      if (url.match(/\/sprints\/\d+\/issues$/)) {
+      if (url.match(/\/sprints\/\d+\/issues/)) {
         return Promise.resolve({
           ok: true,
           json: async () => overrides.sprintIssues || mockSprintIssuesResponse
@@ -165,6 +187,14 @@ describe('App', () => {
       }
       return Promise.reject(new Error(`Unknown URL: ${url}`))
     })
+  }
+
+  /** Navigate into a project to reach ProjectDetail view */
+  async function navigateToProject(wrapper) {
+    const orgDashboard = wrapper.findComponent(OrgDashboard)
+    orgDashboard.vm.$emit('select-project', mockProject)
+    await flushPromises()
+    return wrapper.findComponent(ProjectDetail)
   }
 
   beforeEach(() => {
@@ -200,54 +230,109 @@ describe('App', () => {
     expect(refreshButton.exists()).toBe(true)
   })
 
-  it('renders DashboardGrid component', async () => {
+  it('renders OrgDashboard component on mount', async () => {
     const wrapper = mount(App)
     await flushPromises()
 
-    const grid = wrapper.findComponent(DashboardGrid)
-    expect(grid.exists()).toBe(true)
+    const orgDashboard = wrapper.findComponent(OrgDashboard)
+    expect(orgDashboard.exists()).toBe(true)
   })
 
-  it('fetches boards and dashboard summary on mount', async () => {
+  it('fetches projects and org data on mount', async () => {
     mount(App)
     await flushPromises()
 
     expect(fetch).toHaveBeenCalledWith(
-      expect.stringContaining('/boards'),
+      expect.stringContaining('/projects'),
       expect.any(Object)
     )
     expect(fetch).toHaveBeenCalledWith(
-      expect.stringContaining('/dashboard-summary'),
+      expect.stringContaining('/org-summary'),
       expect.any(Object)
     )
   })
 
-  it('passes boards to DashboardGrid', async () => {
+  it('passes org data to OrgDashboard', async () => {
     const wrapper = mount(App)
     await flushPromises()
 
-    const grid = wrapper.findComponent(DashboardGrid)
-    expect(grid.props('boards')).toHaveLength(2)
-    expect(grid.props('boards')[0].displayName).toBe('Team Alpha')
+    const orgDashboard = wrapper.findComponent(OrgDashboard)
+    expect(orgDashboard.props('projects')).toHaveLength(1)
+    expect(orgDashboard.props('projects')[0].key).toBe('RHOAIENG')
+    expect(orgDashboard.props('orgName')).toBe('AI Engineering')
+  })
+
+  it('navigates to project detail when project is selected', async () => {
+    const wrapper = mount(App)
+    await flushPromises()
+
+    const projectDetail = await navigateToProject(wrapper)
+    expect(projectDetail.exists()).toBe(true)
+  })
+
+  it('loads boards when navigating to project detail', async () => {
+    const wrapper = mount(App)
+    await flushPromises()
+
+    fetch.mockClear()
+    setupFetchMock()
+
+    await navigateToProject(wrapper)
+
+    const boardCalls = fetch.mock.calls.filter(([url]) => url.includes('/boards') && !url.includes('/sprints'))
+    expect(boardCalls).toHaveLength(1)
+  })
+
+  it('navigates to team detail when team is selected from project detail', async () => {
+    const wrapper = mount(App)
+    await flushPromises()
+
+    const projectDetail = await navigateToProject(wrapper)
+    projectDetail.vm.$emit('select-team', mockBoardsResponse.boards[0])
+    await flushPromises()
+
+    const teamDetail = wrapper.findComponent(TeamDetail)
+    expect(teamDetail.exists()).toBe(true)
+    expect(wrapper.text()).toContain('Team Alpha')
+  })
+
+  it('navigates back to project detail from team detail', async () => {
+    const wrapper = mount(App)
+    await flushPromises()
+
+    // Navigate to project detail, then team detail
+    const projectDetail = await navigateToProject(wrapper)
+    projectDetail.vm.$emit('select-team', mockBoardsResponse.boards[0])
+    await flushPromises()
+
+    // Go back
+    const teamDetail = wrapper.findComponent(TeamDetail)
+    teamDetail.vm.$emit('back')
+    await wrapper.vm.$nextTick()
+
+    // Should show project detail again
+    expect(wrapper.findComponent(ProjectDetail).exists()).toBe(true)
+    expect(wrapper.findComponent(TeamDetail).exists()).toBe(false)
+  })
+
+  it('navigates back to org dashboard from project detail', async () => {
+    const wrapper = mount(App)
+    await flushPromises()
+
+    await navigateToProject(wrapper)
+
+    const projectDetail = wrapper.findComponent(ProjectDetail)
+    projectDetail.vm.$emit('back')
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.findComponent(OrgDashboard).exists()).toBe(true)
+    expect(wrapper.findComponent(ProjectDetail).exists()).toBe(false)
   })
 
   it('does not show stale icon when data is recent', async () => {
     const recentDate = new Date().toISOString()
-    fetch.mockReset()
-    fetch.mockImplementation((url) => {
-      if (url.endsWith('/boards')) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({ ...mockBoardsResponse, lastUpdated: recentDate })
-        })
-      }
-      if (url.endsWith('/dashboard-summary')) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({ ...mockDashboardSummaryResponse, lastUpdated: recentDate })
-        })
-      }
-      return Promise.resolve({ ok: true, json: async () => ({}) })
+    setupFetchMock({
+      orgSummary: { ...mockOrgSummaryResponse, lastUpdated: recentDate }
     })
 
     const wrapper = mount(App)
@@ -258,40 +343,8 @@ describe('App', () => {
 
   it('shows stale icon when data is older than 1 hour', async () => {
     const staleDate = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
-    setupFetchMock()
-    fetch.mockImplementation((url, options) => {
-      if (url.endsWith('/boards')) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({ ...mockBoardsResponse, lastUpdated: staleDate })
-        })
-      }
-      if (url.endsWith('/dashboard-summary')) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({ ...mockDashboardSummaryResponse, lastUpdated: staleDate })
-        })
-      }
-      // Fall through to default mock for other URLs
-      return setupFetchMock(), fetch(url, options)
-    })
-
-    // Re-mock cleanly
-    fetch.mockReset()
-    fetch.mockImplementation((url) => {
-      if (url.endsWith('/boards')) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({ ...mockBoardsResponse, lastUpdated: staleDate })
-        })
-      }
-      if (url.endsWith('/dashboard-summary')) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({ ...mockDashboardSummaryResponse, lastUpdated: staleDate })
-        })
-      }
-      return Promise.resolve({ ok: true, json: async () => ({}) })
+    setupFetchMock({
+      orgSummary: { ...mockOrgSummaryResponse, lastUpdated: staleDate }
     })
 
     const wrapper = mount(App)
@@ -314,39 +367,6 @@ describe('App', () => {
     expect(wrapper.text()).toContain('TU')
   })
 
-  it('navigates to team detail when team is selected', async () => {
-    const wrapper = mount(App)
-    await flushPromises()
-
-    const grid = wrapper.findComponent(DashboardGrid)
-    grid.vm.$emit('select-team', mockBoardsResponse.boards[0])
-    await flushPromises()
-
-    const teamDetail = wrapper.findComponent(TeamDetail)
-    expect(teamDetail.exists()).toBe(true)
-    expect(wrapper.text()).toContain('Team Alpha')
-    expect(wrapper.text()).toContain('Back to Dashboard')
-  })
-
-  it('navigates back to dashboard from team detail', async () => {
-    const wrapper = mount(App)
-    await flushPromises()
-
-    // Navigate to team detail
-    const grid = wrapper.findComponent(DashboardGrid)
-    grid.vm.$emit('select-team', mockBoardsResponse.boards[0])
-    await flushPromises()
-
-    // Emit back from TeamDetail
-    const teamDetail = wrapper.findComponent(TeamDetail)
-    teamDetail.vm.$emit('back')
-    await wrapper.vm.$nextTick()
-
-    // Should show dashboard again
-    const gridAgain = wrapper.findComponent(DashboardGrid)
-    expect(gridAgain.exists()).toBe(true)
-  })
-
   it('fetches sprints and issues when navigating to team detail', async () => {
     const wrapper = mount(App)
     await flushPromises()
@@ -354,16 +374,18 @@ describe('App', () => {
     fetch.mockClear()
     setupFetchMock()
 
-    const grid = wrapper.findComponent(DashboardGrid)
-    grid.vm.$emit('select-team', mockBoardsResponse.boards[0])
+    const projectDetail = await navigateToProject(wrapper)
+
+    fetch.mockClear()
+    setupFetchMock()
+
+    projectDetail.vm.$emit('select-team', mockBoardsResponse.boards[0])
     await flushPromises()
 
-    // Should have fetched sprints for board 1
-    const sprintCalls = fetch.mock.calls.filter(([url]) => url.match(/\/boards\/1\/sprints$/))
+    const sprintCalls = fetch.mock.calls.filter(([url]) => url.match(/\/boards\/1\/sprints/))
     expect(sprintCalls).toHaveLength(1)
 
-    // Should have fetched issues for the active sprint (id: 100)
-    const issueCalls = fetch.mock.calls.filter(([url]) => url.match(/\/sprints\/100\/issues$/))
+    const issueCalls = fetch.mock.calls.filter(([url]) => url.match(/\/sprints\/100\/issues/))
     expect(issueCalls).toHaveLength(1)
   })
 
@@ -371,8 +393,8 @@ describe('App', () => {
     const wrapper = mount(App)
     await flushPromises()
 
-    const grid = wrapper.findComponent(DashboardGrid)
-    grid.vm.$emit('select-team', mockBoardsResponse.boards[0])
+    const projectDetail = await navigateToProject(wrapper)
+    projectDetail.vm.$emit('select-team', mockBoardsResponse.boards[0])
     await flushPromises()
 
     const teamDetail = wrapper.findComponent(TeamDetail)
@@ -386,20 +408,18 @@ describe('App', () => {
     const wrapper = mount(App)
     await flushPromises()
 
-    const grid = wrapper.findComponent(DashboardGrid)
-    grid.vm.$emit('select-team', mockBoardsResponse.boards[0])
+    const projectDetail = await navigateToProject(wrapper)
+    projectDetail.vm.$emit('select-team', mockBoardsResponse.boards[0])
     await flushPromises()
 
     fetch.mockClear()
     setupFetchMock()
 
-    // Change sprint
     const teamDetail = wrapper.findComponent(TeamDetail)
     teamDetail.vm.$emit('select-sprint', 99)
     await flushPromises()
 
-    // Should have fetched issues for sprint 99
-    const issueCalls = fetch.mock.calls.filter(([url]) => url.match(/\/sprints\/99\/issues$/))
+    const issueCalls = fetch.mock.calls.filter(([url]) => url.match(/\/sprints\/99\/issues/))
     expect(issueCalls).toHaveLength(1)
   })
 
@@ -407,8 +427,8 @@ describe('App', () => {
     const wrapper = mount(App)
     await flushPromises()
 
-    const grid = wrapper.findComponent(DashboardGrid)
-    grid.vm.$emit('select-team', mockBoardsResponse.boards[0])
+    const projectDetail = await navigateToProject(wrapper)
+    projectDetail.vm.$emit('select-team', mockBoardsResponse.boards[0])
     await flushPromises()
 
     const teamDetail = wrapper.findComponent(TeamDetail)
@@ -424,7 +444,6 @@ describe('App', () => {
   })
 
   it('restores saved sprint when navigating to team detail', async () => {
-    // Pre-set saved sprint for board 1
     localStorageMock.getItem.mockImplementation((key) => {
       if (key === 'selectedSprints') return JSON.stringify({ 1: 99 })
       return null
@@ -433,38 +452,48 @@ describe('App', () => {
     const wrapper = mount(App)
     await flushPromises()
 
+    const projectDetail = await navigateToProject(wrapper)
+
     fetch.mockClear()
     setupFetchMock()
 
-    const grid = wrapper.findComponent(DashboardGrid)
-    grid.vm.$emit('select-team', mockBoardsResponse.boards[0])
+    projectDetail.vm.$emit('select-team', mockBoardsResponse.boards[0])
     await flushPromises()
 
     // Should have fetched issues for sprint 99 (restored), not 100 (active)
-    const issueCalls = fetch.mock.calls.filter(([url]) => url.match(/\/sprints\/99\/issues$/))
+    const issueCalls = fetch.mock.calls.filter(([url]) => url.match(/\/sprints\/99\/issues/))
     expect(issueCalls).toHaveLength(1)
 
-    const sprint100Calls = fetch.mock.calls.filter(([url]) => url.match(/\/sprints\/100\/issues$/))
+    const sprint100Calls = fetch.mock.calls.filter(([url]) => url.match(/\/sprints\/100\/issues/))
     expect(sprint100Calls).toHaveLength(0)
   })
 
   it('shows loading overlay during data fetch', async () => {
-    let resolveBoards
-    const boardsPromise = new Promise((resolve) => {
-      resolveBoards = resolve
+    let resolveProjects
+    const projectsPromise = new Promise((resolve) => {
+      resolveProjects = resolve
     })
 
     fetch.mockImplementation((url) => {
-      if (url.endsWith('/boards')) {
-        return boardsPromise.then(() => Promise.resolve({
+      if (url.endsWith('/projects')) {
+        return projectsPromise.then(() => Promise.resolve({
           ok: true,
-          json: async () => mockBoardsResponse
+          json: async () => ({
+            orgName: 'AI Engineering',
+            projects: [mockProject]
+          })
         }))
       }
-      if (url.endsWith('/dashboard-summary')) {
+      if (url.endsWith('/org-summary')) {
         return Promise.resolve({
           ok: true,
-          json: async () => mockDashboardSummaryResponse
+          json: async () => mockOrgSummaryResponse
+        })
+      }
+      if (url.match(/\/projects\/\w+\/summary$/)) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => mockProjectSummaryResponse
         })
       }
       return Promise.reject(new Error(`Unknown URL: ${url}`))
@@ -473,33 +502,82 @@ describe('App', () => {
     const wrapper = mount(App)
     await flushPromises()
 
-    // Loading indicator should be visible
     expect(wrapper.find('[data-testid="loading-overlay"]').exists()).toBe(true)
 
-    resolveBoards()
+    resolveProjects()
     await flushPromises()
 
     expect(wrapper.find('[data-testid="loading-overlay"]').exists()).toBe(false)
   })
 
-  it('handles boards fetch error gracefully', async () => {
-    fetch.mockImplementation((url) => {
-      if (url.endsWith('/dashboard-summary')) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => mockDashboardSummaryResponse
-        })
-      }
+  it('shows error state when org config fails to load', async () => {
+    fetch.mockImplementation(() => {
       return Promise.reject(new Error('Network error'))
     })
 
     const wrapper = mount(App)
     await flushPromises()
 
-    // Should not crash, should show empty dashboard
-    const grid = wrapper.findComponent(DashboardGrid)
-    expect(grid.exists()).toBe(true)
-    expect(grid.props('boards')).toHaveLength(0)
+    expect(wrapper.find('[data-testid="config-error"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('Failed to load organization configuration')
+  })
+
+  it('shows error state when no projects are configured', async () => {
+    setupFetchMock({
+      projects: { orgName: 'AI Engineering', projects: [] }
+    })
+
+    const wrapper = mount(App)
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="config-error"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('No projects configured')
+  })
+
+  it('retries loading when Retry button is clicked on error state', async () => {
+    let callCount = 0
+    fetch.mockImplementation((url) => {
+      if (url.endsWith('/projects')) {
+        callCount++
+        if (callCount === 1) {
+          return Promise.reject(new Error('Network error'))
+        }
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            orgName: 'AI Engineering',
+            projects: [mockProject]
+          })
+        })
+      }
+      if (url.endsWith('/org-summary')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => mockOrgSummaryResponse
+        })
+      }
+      if (url.match(/\/projects\/\w+\/summary$/)) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => mockProjectSummaryResponse
+        })
+      }
+      return Promise.reject(new Error(`Unknown URL: ${url}`))
+    })
+
+    const wrapper = mount(App)
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="config-error"]').exists()).toBe(true)
+
+    // Click Retry
+    const retryButton = wrapper.findAll('button').find(b => b.text() === 'Retry')
+    await retryButton.trigger('click')
+    await flushPromises()
+
+    // Should now show org dashboard
+    expect(wrapper.find('[data-testid="config-error"]').exists()).toBe(false)
+    expect(wrapper.findComponent(OrgDashboard).exists()).toBe(true)
   })
 
   it('renders a settings gear icon button', async () => {
@@ -522,38 +600,39 @@ describe('App', () => {
     expect(boardSettings.exists()).toBe(true)
   })
 
-  it('navigates back to dashboard from board settings', async () => {
+  it('navigates back to org dashboard from board settings', async () => {
     const wrapper = mount(App)
     await flushPromises()
 
-    // Navigate to settings
     const settingsButton = wrapper.findAll('button').find(b => b.attributes('title') === 'Board Settings')
     await settingsButton.trigger('click')
     await flushPromises()
 
-    // Click back
     const boardSettings = wrapper.findComponent(BoardSettings)
     boardSettings.vm.$emit('back')
     await wrapper.vm.$nextTick()
 
-    // Should show dashboard again
-    const grid = wrapper.findComponent(DashboardGrid)
-    expect(grid.exists()).toBe(true)
+    expect(wrapper.findComponent(OrgDashboard).exists()).toBe(true)
   })
 
-  it('passes boardSprintData from dashboard summary to DashboardGrid', async () => {
+  it('navigates back to project detail from board settings when project is selected', async () => {
     const wrapper = mount(App)
     await flushPromises()
 
-    const grid = wrapper.findComponent(DashboardGrid)
-    const sprintData = grid.props('boardSprintData')
-    expect(sprintData).toBeDefined()
-    expect(sprintData[1]).toBeDefined()
-    expect(sprintData[1].sprint.id).toBe(100)
-    expect(sprintData[1].summary).toBeDefined()
-    expect(sprintData[1].summary.totalPoints).toBe(45)
-    expect(sprintData[1].summary.buckets).toBeDefined()
-    expect(sprintData[2]).toBeDefined()
+    // Navigate into a project first
+    await navigateToProject(wrapper)
+
+    // Go to settings
+    const settingsButton = wrapper.findAll('button').find(b => b.attributes('title') === 'Board Settings')
+    await settingsButton.trigger('click')
+    await flushPromises()
+
+    // Go back
+    const boardSettings = wrapper.findComponent(BoardSettings)
+    boardSettings.vm.$emit('back')
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.findComponent(ProjectDetail).exists()).toBe(true)
   })
 
   it('sends async refresh and shows toast', async () => {
@@ -617,44 +696,23 @@ describe('App', () => {
     expect(body.hardRefresh).toBe(true)
   })
 
-  it('loads only 3 API calls on mount (projects + boards + dashboard-summary)', async () => {
+  it('loads 3 API calls on mount (projects + org-summary + project summary)', async () => {
     fetch.mockReset()
-    fetch.mockImplementation((url) => {
-      if (url.endsWith('/projects')) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({
-            orgName: 'AI Engineering',
-            projects: [{ key: 'RHOAIENG', name: 'OpenShift AI Engineering', pillar: 'OpenShift AI' }]
-          })
-        })
-      }
-      if (url.endsWith('/boards')) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => mockBoardsResponse
-        })
-      }
-      if (url.endsWith('/dashboard-summary')) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => mockDashboardSummaryResponse
-        })
-      }
-      return Promise.reject(new Error(`Unknown URL: ${url}`))
-    })
+    setupFetchMock()
 
     mount(App)
     await flushPromises()
 
-    // Should have 3 fetch calls: /projects, /boards, and /dashboard-summary
+    // Should have 3 fetch calls: /projects, /org-summary, and /projects/RHOAIENG/summary
     expect(fetch).toHaveBeenCalledTimes(3)
   })
 
   describe('Saved Filters', () => {
-    it('renders FilterSelector in dashboard view', async () => {
+    it('renders FilterSelector in project detail view', async () => {
       const wrapper = mount(App)
       await flushPromises()
+
+      await navigateToProject(wrapper)
 
       const filterSelector = wrapper.findComponent(FilterSelector)
       expect(filterSelector.exists()).toBe(true)
@@ -664,68 +722,20 @@ describe('App', () => {
       const wrapper = mount(App)
       await flushPromises()
 
-      const grid = wrapper.findComponent(DashboardGrid)
-      grid.vm.$emit('select-team', mockBoardsResponse.boards[0])
+      const projectDetail = await navigateToProject(wrapper)
+      projectDetail.vm.$emit('select-team', mockBoardsResponse.boards[0])
       await flushPromises()
 
       const filterSelector = wrapper.findComponent(FilterSelector)
       expect(filterSelector.exists()).toBe(false)
     })
 
-    it('passes all boards to DashboardGrid when no filter is active', async () => {
+    it('opens FilterEditor when create-filter is emitted from project detail', async () => {
       const wrapper = mount(App)
       await flushPromises()
 
-      const grid = wrapper.findComponent(DashboardGrid)
-      expect(grid.props('boards')).toHaveLength(2)
-    })
-
-    it('passes filtered boards to DashboardGrid when a filter is active', async () => {
-      // Pre-set a filter in localStorage that includes only board 1
-      localStorageMock.getItem.mockImplementation((key) => {
-        if (key === 'dashboardFilters') {
-          return JSON.stringify([{ id: 'f1', name: 'Just Alpha', boardIds: [1] }])
-        }
-        if (key === 'activeFilterId') return 'f1'
-        return null
-      })
-
-      const wrapper = mount(App)
-      await flushPromises()
-
-      const grid = wrapper.findComponent(DashboardGrid)
-      expect(grid.props('boards')).toHaveLength(1)
-      expect(grid.props('boards')[0].id).toBe(1)
-    })
-
-    it('shows all boards when "All Teams" is selected', async () => {
-      // Start with a filter active
-      localStorageMock.getItem.mockImplementation((key) => {
-        if (key === 'dashboardFilters') {
-          return JSON.stringify([{ id: 'f1', name: 'Just Alpha', boardIds: [1] }])
-        }
-        if (key === 'activeFilterId') return 'f1'
-        return null
-      })
-
-      const wrapper = mount(App)
-      await flushPromises()
-
-      // Select "All Teams" via FilterSelector
-      const filterSelector = wrapper.findComponent(FilterSelector)
-      filterSelector.vm.$emit('select-filter', null)
-      await wrapper.vm.$nextTick()
-
-      const grid = wrapper.findComponent(DashboardGrid)
-      expect(grid.props('boards')).toHaveLength(2)
-    })
-
-    it('opens FilterEditor when create-filter is emitted', async () => {
-      const wrapper = mount(App)
-      await flushPromises()
-
-      const filterSelector = wrapper.findComponent(FilterSelector)
-      filterSelector.vm.$emit('create-filter')
+      const projectDetail = await navigateToProject(wrapper)
+      projectDetail.vm.$emit('create-filter')
       await wrapper.vm.$nextTick()
 
       const editor = wrapper.findComponent(FilterEditor)
@@ -744,8 +754,8 @@ describe('App', () => {
       const wrapper = mount(App)
       await flushPromises()
 
-      const filterSelector = wrapper.findComponent(FilterSelector)
-      filterSelector.vm.$emit('edit-filter', 'f1')
+      const projectDetail = await navigateToProject(wrapper)
+      projectDetail.vm.$emit('edit-filter', 'f1')
       await wrapper.vm.$nextTick()
 
       const editor = wrapper.findComponent(FilterEditor)
@@ -754,25 +764,14 @@ describe('App', () => {
       expect(editor.props('filter').name).toBe('My Teams')
     })
 
-    it('passes all boards to FilterEditor', async () => {
-      const wrapper = mount(App)
-      await flushPromises()
-
-      const filterSelector = wrapper.findComponent(FilterSelector)
-      filterSelector.vm.$emit('create-filter')
-      await wrapper.vm.$nextTick()
-
-      const editor = wrapper.findComponent(FilterEditor)
-      expect(editor.props('boards')).toHaveLength(2)
-    })
-
     it('creates a new filter when FilterEditor emits save in create mode', async () => {
       const wrapper = mount(App)
       await flushPromises()
 
+      const projectDetail = await navigateToProject(wrapper)
+
       // Open create modal
-      const filterSelector = wrapper.findComponent(FilterSelector)
-      filterSelector.vm.$emit('create-filter')
+      projectDetail.vm.$emit('create-filter')
       await wrapper.vm.$nextTick()
 
       // Save the filter
@@ -803,9 +802,10 @@ describe('App', () => {
       const wrapper = mount(App)
       await flushPromises()
 
+      const projectDetail = await navigateToProject(wrapper)
+
       // Open edit modal
-      const filterSelector = wrapper.findComponent(FilterSelector)
-      filterSelector.vm.$emit('edit-filter', 'f1')
+      projectDetail.vm.$emit('edit-filter', 'f1')
       await wrapper.vm.$nextTick()
 
       // Save updated filter
@@ -839,8 +839,8 @@ describe('App', () => {
       const wrapper = mount(App)
       await flushPromises()
 
-      const filterSelector = wrapper.findComponent(FilterSelector)
-      filterSelector.vm.$emit('delete-filter', 'f1')
+      const projectDetail = await navigateToProject(wrapper)
+      projectDetail.vm.$emit('delete-filter', 'f1')
       await wrapper.vm.$nextTick()
 
       // Check that filter was removed from localStorage
@@ -856,9 +856,10 @@ describe('App', () => {
       const wrapper = mount(App)
       await flushPromises()
 
+      const projectDetail = await navigateToProject(wrapper)
+
       // Open create modal
-      const filterSelector = wrapper.findComponent(FilterSelector)
-      filterSelector.vm.$emit('create-filter')
+      projectDetail.vm.$emit('create-filter')
       await wrapper.vm.$nextTick()
 
       expect(wrapper.findComponent(FilterEditor).exists()).toBe(true)
@@ -869,24 +870,6 @@ describe('App', () => {
       await wrapper.vm.$nextTick()
 
       expect(wrapper.findComponent(FilterEditor).exists()).toBe(false)
-    })
-
-    it('excludes boards not in active filter even if they exist in API response', async () => {
-      // Filter only includes board 2
-      localStorageMock.getItem.mockImplementation((key) => {
-        if (key === 'dashboardFilters') {
-          return JSON.stringify([{ id: 'f1', name: 'Beta Only', boardIds: [2] }])
-        }
-        if (key === 'activeFilterId') return 'f1'
-        return null
-      })
-
-      const wrapper = mount(App)
-      await flushPromises()
-
-      const grid = wrapper.findComponent(DashboardGrid)
-      expect(grid.props('boards')).toHaveLength(1)
-      expect(grid.props('boards')[0].displayName).toBe('Team Beta')
     })
   })
 })
