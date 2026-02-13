@@ -24,6 +24,11 @@
     }
   },
   "function": {
+    "aggregator": {
+      "build": true,
+      "providerPlugin": "awscloudformation",
+      "service": "Lambda"
+    },
     "dataReader": {
       "build": true,
       "providerPlugin": "awscloudformation",
@@ -33,9 +38,30 @@
       "build": true,
       "providerPlugin": "awscloudformation",
       "service": "Lambda"
+    },
+    "scheduler": {
+      "build": true,
+      "providerPlugin": "awscloudformation",
+      "service": "Lambda"
     }
   },
   "parameters": {
+    "AMPLIFY_function_aggregator_deploymentBucketName": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "aggregator"
+        }
+      ]
+    },
+    "AMPLIFY_function_aggregator_s3Key": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "aggregator"
+        }
+      ]
+    },
     "AMPLIFY_function_dataReader_deploymentBucketName": {
       "usedBy": [
         {
@@ -65,6 +91,22 @@
         {
           "category": "function",
           "resourceName": "jiraFetcher"
+        }
+      ]
+    },
+    "AMPLIFY_function_scheduler_deploymentBucketName": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "scheduler"
+        }
+      ]
+    },
+    "AMPLIFY_function_scheduler_s3Key": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "scheduler"
         }
       ]
     }

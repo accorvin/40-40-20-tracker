@@ -1,0 +1,10 @@
+{
+  "name": "aggregator",
+  "version": "1.0.0",
+  "description": "Lambda function: Recompute project and org rollup summaries",
+  "main": "index.js",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.948.0"
+  }
+}

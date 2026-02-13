@@ -1,6 +1,6 @@
 {
   "AWSTemplateFormatVersion": "2010-09-09",
-  "Description": "{\"createdOn\":\"Mac\",\"createdBy\":\"Amplify\",\"createdWith\":\"14.2.3\",\"stackType\":\"function-Lambda\",\"metadata\":{\"whyContinueWithGen1\":\"Prefer not to answer\"}}",
+  "Description": "Aggregator Lambda: recomputes project and org rollup summaries from per-board data",
   "Parameters": {
     "CloudWatchRule": {
       "Type": "String",
@@ -16,22 +16,9 @@
     "s3Key": {
       "Type": "String"
     },
-    "jiraHost": {
-      "Type": "String",
-      "Description": "Jira host URL"
-    },
     "s3Bucket": {
       "Type": "String",
-      "Description": "S3 bucket for storing sprint data"
-    },
-    "firebaseProjectId": {
-      "Type": "String",
-      "Description": "Firebase project ID"
-    },
-    "jiraTokenParameterName": {
-      "Type": "String",
-      "Description": "SSM Parameter Store path for Jira API token",
-      "Default": "/40-40-20-tracker/dev/jira-token"
+      "Description": "S3 bucket for reading and writing summary data"
     }
   },
   "Conditions": {
@@ -76,12 +63,12 @@
         "FunctionName": {
           "Fn::If": [
             "ShouldNotCreateEnvResources",
-            "jiraFetcher",
+            "aggregator",
             {
               "Fn::Join": [
                 "",
                 [
-                  "jiraFetcher",
+                  "aggregator",
                   "-",
                   {
                     "Ref": "env"
@@ -99,20 +86,8 @@
             "REGION": {
               "Ref": "AWS::Region"
             },
-            "JIRA_HOST": {
-              "Ref": "jiraHost"
-            },
-            "JIRA_TOKEN_PARAMETER_NAME": {
-              "Ref": "jiraTokenParameterName"
-            },
             "S3_BUCKET": {
               "Ref": "s3Bucket"
-            },
-            "FIREBASE_PROJECT_ID": {
-              "Ref": "firebaseProjectId"
-            },
-            "BOARD_REFRESH_QUEUE_URL": {
-              "Ref": "BoardRefreshQueue"
             }
           }
         },
@@ -124,8 +99,7 @@
         },
         "Runtime": "nodejs18.x",
         "Layers": [],
-        "Timeout": 900,
-        "ReservedConcurrentExecutions": 2
+        "Timeout": 60
       }
     },
     "LambdaExecutionRole": {
@@ -134,12 +108,12 @@
         "RoleName": {
           "Fn::If": [
             "ShouldNotCreateEnvResources",
-            "4040trackerFetcherRole",
+            "4040trackerAggregatorRole",
             {
               "Fn::Join": [
                 "",
                 [
-                  "4040trackerFetcherRole",
+                  "4040trackerAggregatorRole",
                   "-",
                   {
                     "Ref": "env"
@@ -214,7 +188,7 @@
       "Type": "AWS::Events::Rule",
       "Condition": "ShouldCreateSchedule",
       "Properties": {
-        "Description": "Hourly refresh of Jira sprint data",
+        "Description": "Trigger aggregator 20 min after scheduler to recompute rollup summaries",
         "ScheduleExpression": {
           "Ref": "CloudWatchRule"
         },
@@ -227,7 +201,7 @@
                 "Arn"
               ]
             },
-            "Id": "JiraFetcherScheduledTarget"
+            "Id": "AggregatorTarget"
           }
         ]
       }
@@ -247,76 +221,6 @@
             "Arn"
           ]
         }
-      }
-    },
-    "BoardRefreshDLQ": {
-      "Type": "AWS::SQS::Queue",
-      "Properties": {
-        "QueueName": {
-          "Fn::If": [
-            "ShouldNotCreateEnvResources",
-            "4040tracker-board-refresh-dlq",
-            {
-              "Fn::Join": [
-                "",
-                [
-                  "4040tracker-board-refresh-dlq-",
-                  {
-                    "Ref": "env"
-                  }
-                ]
-              ]
-            }
-          ]
-        },
-        "MessageRetentionPeriod": 1209600
-      }
-    },
-    "BoardRefreshQueue": {
-      "Type": "AWS::SQS::Queue",
-      "Properties": {
-        "QueueName": {
-          "Fn::If": [
-            "ShouldNotCreateEnvResources",
-            "4040tracker-board-refresh",
-            {
-              "Fn::Join": [
-                "",
-                [
-                  "4040tracker-board-refresh-",
-                  {
-                    "Ref": "env"
-                  }
-                ]
-              ]
-            }
-          ]
-        },
-        "VisibilityTimeout": 300,
-        "RedrivePolicy": {
-          "deadLetterTargetArn": {
-            "Fn::GetAtt": [
-              "BoardRefreshDLQ",
-              "Arn"
-            ]
-          },
-          "maxReceiveCount": 3
-        }
-      }
-    },
-    "BoardRefreshEventSourceMapping": {
-      "Type": "AWS::Lambda::EventSourceMapping",
-      "Properties": {
-        "EventSourceArn": {
-          "Fn::GetAtt": [
-            "BoardRefreshQueue",
-            "Arn"
-          ]
-        },
-        "FunctionName": {
-          "Ref": "LambdaFunction"
-        },
-        "BatchSize": 1
       }
     },
     "CustomLambdaExecutionPolicy": {
@@ -342,27 +246,6 @@
               ],
               "Resource": [
                 "arn:aws:s3:::acorvin-40-40-20-tracker"
-              ],
-              "Effect": "Allow"
-            },
-            {
-              "Action": [
-                "ssm:GetParameter"
-              ],
-              "Resource": [
-                "arn:aws:ssm:us-east-1:*:parameter/jira-tracker-app/*/jira-token"
-              ],
-              "Effect": "Allow"
-            },
-            {
-              "Action": [
-                "sqs:ReceiveMessage",
-                "sqs:DeleteMessage",
-                "sqs:GetQueueAttributes",
-                "sqs:SendMessage"
-              ],
-              "Resource": [
-                "arn:aws:sqs:us-east-1:*:4040tracker-board-refresh-*"
               ],
               "Effect": "Allow"
             }
@@ -405,19 +288,6 @@
       "Value": {
         "Fn::GetAtt": [
           "LambdaExecutionRole",
-          "Arn"
-        ]
-      }
-    },
-    "BoardRefreshQueueUrl": {
-      "Value": {
-        "Ref": "BoardRefreshQueue"
-      }
-    },
-    "BoardRefreshQueueArn": {
-      "Value": {
-        "Fn::GetAtt": [
-          "BoardRefreshQueue",
           "Arn"
         ]
       }

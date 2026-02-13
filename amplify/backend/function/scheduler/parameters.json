@@ -1,0 +1,5 @@
+{
+  "CloudWatchRule": "NONE",
+  "s3Bucket": "acorvin-40-40-20-tracker",
+  "boardRefreshQueueUrl": "PENDING_DEPLOY"
+}

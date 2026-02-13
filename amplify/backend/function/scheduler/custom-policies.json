@@ -1,0 +1,14 @@
+[
+  {
+    "Action": ["s3:GetObject"],
+    "Resource": ["arn:aws:s3:::acorvin-40-40-20-tracker/*"]
+  },
+  {
+    "Action": ["s3:ListBucket"],
+    "Resource": ["arn:aws:s3:::acorvin-40-40-20-tracker"]
+  },
+  {
+    "Action": ["sqs:SendMessage"],
+    "Resource": ["arn:aws:sqs:us-east-1:*:4040tracker-board-refresh-*"]
+  }
+]

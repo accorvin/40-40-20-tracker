@@ -16,6 +16,8 @@ export type AmplifyDependentResourcesAttributes = {
     },
     "jiraFetcher": {
       "Arn": "string",
+      "BoardRefreshQueueArn": "string",
+      "BoardRefreshQueueUrl": "string",
       "LambdaExecutionRole": "string",
       "LambdaExecutionRoleArn": "string",
       "Name": "string",

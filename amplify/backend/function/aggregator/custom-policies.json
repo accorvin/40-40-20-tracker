@@ -1,0 +1,10 @@
+[
+  {
+    "Action": ["s3:GetObject", "s3:PutObject"],
+    "Resource": ["arn:aws:s3:::acorvin-40-40-20-tracker/*"]
+  },
+  {
+    "Action": ["s3:ListBucket"],
+    "Resource": ["arn:aws:s3:::acorvin-40-40-20-tracker"]
+  }
+]

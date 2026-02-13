@@ -12,11 +12,12 @@ const bodyParser = require('body-parser');
 const awsServerlessExpressMiddleware = require('aws-serverless-express/middleware');
 const { S3Client, GetObjectCommand, PutObjectCommand } = require('@aws-sdk/client-s3');
 const { LambdaClient, InvokeCommand } = require('@aws-sdk/client-lambda');
+const { SQSClient, SendMessageCommand } = require('@aws-sdk/client-sqs');
 const { SSMClient, GetParameterCommand } = require('@aws-sdk/client-ssm');
 const fetch = require('node-fetch');
 const { verifyFirebaseToken } = require('./verifyToken');
 const { createJiraClient } = require('./shared/jira-client');
-const { discoverBoards, performRefresh: sharedPerformRefresh, performMultiProjectRefresh: sharedMultiProjectRefresh } = require('./shared/orchestration');
+const { discoverBoards, performRefresh: sharedPerformRefresh, performMultiProjectRefresh: sharedMultiProjectRefresh, processBoard: sharedProcessBoard } = require('./shared/orchestration');
 const { getStoragePrefix, createPrefixedStorage } = require('./shared/config');
 
 const app = express();
@@ -35,10 +36,12 @@ app.use(function(req, res, next) {
 const s3Client = new S3Client({ region: process.env.AWS_REGION || 'us-east-1' });
 const ssmClient = new SSMClient({ region: process.env.AWS_REGION || 'us-east-1' });
 const lambdaClient = new LambdaClient({ region: process.env.AWS_REGION || 'us-east-1' });
+const sqsClient = new SQSClient({ region: process.env.AWS_REGION || 'us-east-1' });
 
 const S3_BUCKET = process.env.S3_BUCKET;
 const JIRA_HOST = process.env.JIRA_HOST || 'https://issues.redhat.com';
 const JIRA_TOKEN_PARAMETER_NAME = process.env.JIRA_TOKEN_PARAMETER_NAME || '/40-40-20-tracker/dev/jira-token';
+const BOARD_REFRESH_QUEUE_URL = process.env.BOARD_REFRESH_QUEUE_URL;
 
 // Cache Jira token in memory
 let cachedJiraToken = null;
@@ -79,7 +82,8 @@ async function getJiraToken() {
 async function jiraRequest(path) {
   const token = await getJiraToken();
   const url = `${JIRA_HOST}${path}`;
-  const MAX_RETRIES = 3;
+  // Reduced from 3 to 1: SQS handles retry backoff via visibility timeout
+  const MAX_RETRIES = 1;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     console.log(`[Jira API] GET ${url}`);
@@ -239,7 +243,59 @@ async function performMultiProjectRefresh({ projects, hardRefresh }) {
 }
 
 /**
- * POST /refresh - Kick off async refresh via Lambda self-invocation
+ * Process a single board from an SQS message.
+ * Called from index.js when the event source is SQS.
+ */
+async function processSqsMessage(message) {
+  const { projectKey, boardId, boardName, hardRefresh } = message;
+  const deps = getDepsForProject(projectKey);
+
+  const result = await sharedProcessBoard({
+    board: { id: boardId, name: boardName },
+    hardRefresh: hardRefresh || false,
+    fetchSprints: deps.fetchSprints,
+    fetchSprintIssues: deps.fetchSprintIssues,
+    readStorage: deps.readStorage,
+    writeStorage: deps.writeStorage
+  });
+
+  console.log(`Processed board ${boardName} (${boardId}): ${result.sprintResults.length} sprints`);
+  return { success: true, boardId, sprintCount: result.sprintResults.length };
+}
+
+/**
+ * Send SQS messages to refresh all enabled boards for a project.
+ */
+async function enqueueBoardRefreshes({ projectKey, hardRefresh }) {
+  const deps = getDepsForProject(projectKey);
+  const teamsData = await deps.readStorage('teams.json');
+
+  if (!teamsData?.teams?.length) {
+    console.log(`No teams found for project ${projectKey}`);
+    return 0;
+  }
+
+  const enabledTeams = teamsData.teams.filter(t => t.enabled !== false);
+  console.log(`Enqueueing ${enabledTeams.length} board refresh messages for ${projectKey}`);
+
+  for (const team of enabledTeams) {
+    const command = new SendMessageCommand({
+      QueueUrl: BOARD_REFRESH_QUEUE_URL,
+      MessageBody: JSON.stringify({
+        projectKey,
+        boardId: team.boardId,
+        boardName: team.boardName || team.displayName,
+        hardRefresh: hardRefresh || false
+      })
+    });
+    await sqsClient.send(command);
+  }
+
+  return enabledTeams.length;
+}
+
+/**
+ * POST /refresh - Enqueue board refresh messages via SQS
  */
 app.post('/refresh', async function(req, res) {
   try {
@@ -255,30 +311,35 @@ app.post('/refresh', async function(req, res) {
 
     console.log(`Refresh requested by ${verification.email} (hardRefresh: ${hardRefresh})`);
 
-    // Invoke self asynchronously
-    const functionName = process.env.AWS_LAMBDA_FUNCTION_NAME;
-    if (functionName) {
-      const command = new InvokeCommand({
-        FunctionName: functionName,
-        InvocationType: 'Event',
-        Payload: JSON.stringify({
-          action: 'refresh',
-          projectKey,
-          hardRefresh
-        })
-      });
-      await lambdaClient.send(command);
-      console.log('Async refresh invocation sent');
+    if (BOARD_REFRESH_QUEUE_URL) {
+      // SQS fan-out: enqueue individual board refresh messages
+      const boardCount = await enqueueBoardRefreshes({ projectKey, hardRefresh });
+      console.log(`Enqueued ${boardCount} board refresh messages`);
+      res.json({ status: 'started', boardCount });
     } else {
-      // Fallback for local testing via Lambda
-      setImmediate(() => {
-        performRefresh({ projectKey, hardRefresh }).catch(error => {
-          console.error('Background refresh error:', error);
+      // Fallback: direct invocation (local dev or pre-SQS deployment)
+      const functionName = process.env.AWS_LAMBDA_FUNCTION_NAME;
+      if (functionName) {
+        const command = new InvokeCommand({
+          FunctionName: functionName,
+          InvocationType: 'Event',
+          Payload: JSON.stringify({
+            action: 'refresh',
+            projectKey,
+            hardRefresh
+          })
         });
-      });
+        await lambdaClient.send(command);
+        console.log('Async refresh invocation sent');
+      } else {
+        setImmediate(() => {
+          performRefresh({ projectKey, hardRefresh }).catch(error => {
+            console.error('Background refresh error:', error);
+          });
+        });
+      }
+      res.json({ status: 'started' });
     }
-
-    res.json({ status: 'started' });
 
   } catch (error) {
     console.error('Refresh error:', error);
@@ -303,3 +364,4 @@ module.exports = app;
 module.exports.performRefresh = performRefresh;
 module.exports.performMultiProjectRefresh = performMultiProjectRefresh;
 module.exports.readOrgConfig = readOrgConfig;
+module.exports.processSqsMessage = processSqsMessage;
