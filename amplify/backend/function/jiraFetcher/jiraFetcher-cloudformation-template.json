@@ -292,7 +292,7 @@
             }
           ]
         },
-        "VisibilityTimeout": 300,
+        "VisibilityTimeout": 960,
         "RedrivePolicy": {
           "deadLetterTargetArn": {
             "Fn::GetAtt": [
