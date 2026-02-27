@@ -230,51 +230,84 @@
 
         <div v-else class="divide-y divide-gray-200">
           <div
-            v-for="team in sortedTeams"
-            :key="team.boardId"
-            data-testid="team-row"
-            :class="[
-              'flex items-center justify-between py-3 px-3 rounded-md hover:bg-primary-50 even:bg-gray-50 transition-colors',
-              team.stale ? 'opacity-60' : ''
-            ]"
+            v-for="(group, groupIdx) in groupedTeams"
+            :key="group.boardId"
+            class="py-1"
           >
-            <div class="flex-1">
-              <div class="flex items-center gap-2">
-                <span class="font-medium text-gray-900">{{ team.displayName || team.boardName }}</span>
-                <span class="ml-2 text-sm text-gray-500">ID: {{ team.boardId }}</span>
-                <span
-                  v-if="team.stale"
-                  class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600"
-                >
-                  Inactive
-                </span>
+            <div
+              v-for="(team, idx) in group.entries"
+              :key="team.teamId || team.boardId"
+              data-testid="team-row"
+              :class="[
+                'flex items-center justify-between py-3 px-3 rounded-md hover:bg-primary-50 transition-colors',
+                team.stale ? 'opacity-60' : '',
+                idx > 0 ? 'ml-6' : ''
+              ]"
+            >
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2">
+                  <span class="font-medium text-gray-900">{{ team.displayName || team.boardName }}</span>
+                  <span class="ml-2 text-sm text-gray-500">ID: {{ team.boardId }}</span>
+                  <span
+                    v-if="team.sprintFilter"
+                    class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700"
+                  >
+                    {{ team.sprintFilter }}
+                  </span>
+                  <span
+                    v-if="team.stale"
+                    class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600"
+                  >
+                    Inactive
+                  </span>
+                </div>
+                <p v-if="team.stale" class="text-xs text-gray-400 mt-0.5">
+                  {{ team.lastSprintEndDate ? `Last sprint ended ${formatRelativeDate(team.lastSprintEndDate)}` : 'No sprints found' }}
+                </p>
+                <div class="flex items-center gap-2 mt-1.5">
+                  <input
+                    v-model="team.sprintFilter"
+                    type="text"
+                    class="px-2 py-1 text-xs border border-gray-300 rounded w-48 focus:ring-primary-500 focus:border-primary-500"
+                    placeholder="Sprint name filter..."
+                    data-testid="sprint-filter-input"
+                  />
+                  <button
+                    @click="addSubTeam(team.boardId, team.boardName)"
+                    class="text-xs text-primary-600 hover:text-primary-800 font-medium whitespace-nowrap"
+                    data-testid="add-sub-team"
+                  >+ Add Sub-team</button>
+                  <button
+                    v-if="team.sprintFilter && group.entries.length > 1"
+                    @click="removeSubTeam(team)"
+                    class="text-xs text-red-500 hover:text-red-700 font-medium whitespace-nowrap"
+                    data-testid="remove-sub-team"
+                  >Remove</button>
+                </div>
               </div>
-              <p v-if="team.stale" class="text-xs text-gray-400 mt-0.5">
-                {{ team.lastSprintEndDate ? `Last sprint ended ${formatRelativeDate(team.lastSprintEndDate)}` : 'No sprints found' }}
-              </p>
-            </div>
-            <div class="flex items-center gap-4">
-              <div class="flex items-center gap-2">
-                <span class="text-xs text-gray-500">Calculate by:</span>
-                <select
-                  v-model="team.calculationMode"
-                  @change="updateCalculationMode(team.boardId, team.calculationMode)"
-                  class="text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary-300"
-                  data-testid="calculation-mode-select"
-                >
-                  <option value="points">Story Points</option>
-                  <option value="counts">Issue Counts</option>
-                </select>
+              <div class="flex items-center gap-4">
+                <div class="flex items-center gap-2">
+                  <span class="text-xs text-gray-500">Calculate by:</span>
+                  <select
+                    v-model="team.calculationMode"
+                    @change="updateCalculationMode(team.teamId || team.boardId, team.calculationMode)"
+                    class="text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary-300"
+                    data-testid="calculation-mode-select"
+                  >
+                    <option value="points">Story Points</option>
+                    <option value="counts">Issue Counts</option>
+                  </select>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    :checked="team.enabled"
+                    @change="toggleTeam(team.teamId || team.boardId)"
+                    class="sr-only peer"
+                  />
+                  <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
+                </label>
               </div>
-              <label class="relative inline-flex items-center cursor-pointer">
-                <input
-                  type="checkbox"
-                  :checked="team.enabled"
-                  @change="toggleTeam(team.boardId)"
-                  class="sr-only peer"
-                />
-                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
-              </label>
             </div>
           </div>
         </div>
@@ -428,24 +461,72 @@ async function loadTeams() {
   }
 }
 
-function toggleTeam(boardId) {
-  const team = teams.value.find(t => t.boardId === boardId)
+function toggleTeam(teamId) {
+  const team = teams.value.find(t => (t.teamId || t.boardId) === teamId)
   if (team) {
     team.enabled = !team.enabled
   }
 }
 
-function updateCalculationMode(boardId, mode) {
-  const team = teams.value.find(t => t.boardId === boardId)
+function updateCalculationMode(teamId, mode) {
+  const team = teams.value.find(t => (t.teamId || t.boardId) === teamId)
   if (team) {
     team.calculationMode = mode
   }
 }
 
+function addSubTeam(boardId, boardName) {
+  teams.value.push({
+    boardId,
+    boardName,
+    displayName: boardName.replace(/^RHOAIENG\s*[-–]\s*/, ''),
+    enabled: true,
+    sprintFilter: '',
+    calculationMode: 'points',
+    teamId: `${boardId}_sub_${Date.now()}`
+  })
+}
+
+function removeSubTeam(team) {
+  const idx = teams.value.indexOf(team)
+  if (idx >= 0) {
+    teams.value.splice(idx, 1)
+  }
+}
+
+const groupedTeams = computed(() => {
+  const groups = new Map()
+  for (const team of sortedTeams.value) {
+    const key = team.boardId
+    if (!groups.has(key)) {
+      groups.set(key, { boardId: key, entries: [] })
+    }
+    groups.get(key).entries.push(team)
+  }
+  // Within each group, primary (no filter) first, then sub-teams
+  for (const group of groups.values()) {
+    group.entries.sort((a, b) => {
+      if (!a.sprintFilter && b.sprintFilter) return -1
+      if (a.sprintFilter && !b.sprintFilter) return 1
+      return 0
+    })
+  }
+  return Array.from(groups.values())
+})
+
 async function handleSave() {
   isSaving.value = true
   try {
-    await saveTeams(teams.value)
+    // Auto-generate teamId for entries with sprintFilter and trim filters
+    const teamsToSave = teams.value.map(t => {
+      const copy = { ...t }
+      if (copy.sprintFilter) copy.sprintFilter = copy.sprintFilter.trim()
+      if (copy.sprintFilter && !copy.teamId) {
+        copy.teamId = `${copy.boardId}_${copy.sprintFilter.toLowerCase().replace(/\s+/g, '-')}`
+      }
+      return copy
+    })
+    await saveTeams(teamsToSave)
     emit('saved')
   } catch (error) {
     console.error('Failed to save teams:', error)

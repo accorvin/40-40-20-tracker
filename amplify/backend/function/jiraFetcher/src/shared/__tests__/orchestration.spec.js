@@ -423,6 +423,105 @@ describe('processBoard', () => {
 
     expect(fetchSprintIssues).not.toHaveBeenCalled();
   });
+
+  it('filters sprints by name when sprintFilter is set', async () => {
+    const readStorage = vi.fn().mockReturnValue(null);
+    const writeStorage = vi.fn();
+    const fetchSprints = vi.fn().mockResolvedValue([
+      { id: 100, name: 'Alpha Sprint 1', state: 'active', startDate: '2025-06-01', endDate: '2025-06-14', completeDate: null },
+      { id: 101, name: 'Beta Sprint 1', state: 'active', startDate: '2025-06-01', endDate: '2025-06-14', completeDate: null },
+      { id: 102, name: 'Alpha Sprint 2', state: 'closed', startDate: '2025-05-01', endDate: '2025-05-14', completeDate: '2025-05-14T00:00:00Z' }
+    ]);
+    const fetchSprintIssues = vi.fn().mockResolvedValue([
+      { key: 'P-1', summary: 'Task', issueType: 'Task', activityType: 'New Features', storyPoints: 3, resolution: null }
+    ]);
+
+    const result = await processBoard({
+      board: { id: 1, name: 'Shared Board' },
+      hardRefresh: false,
+      sprintFilter: 'Alpha',
+      fetchSprints,
+      fetchSprintIssues,
+      readStorage,
+      writeStorage
+    });
+
+    // Should only process Alpha sprints (2 of 3)
+    expect(result.sprintResults).toHaveLength(2);
+    expect(result.sprintResults.every(r => r.sprintName.includes('Alpha'))).toBe(true);
+  });
+
+  it('sprint filter is case-insensitive', async () => {
+    const readStorage = vi.fn().mockReturnValue(null);
+    const writeStorage = vi.fn();
+    const fetchSprints = vi.fn().mockResolvedValue([
+      { id: 100, name: 'ALPHA Sprint 1', state: 'active', startDate: '2025-06-01', endDate: '2025-06-14', completeDate: null },
+      { id: 101, name: 'Beta Sprint 1', state: 'active', startDate: '2025-06-01', endDate: '2025-06-14', completeDate: null }
+    ]);
+    const fetchSprintIssues = vi.fn().mockResolvedValue([
+      { key: 'P-1', summary: 'Task', issueType: 'Task', activityType: 'New Features', storyPoints: 3, resolution: null }
+    ]);
+
+    const result = await processBoard({
+      board: { id: 1, name: 'Shared Board' },
+      hardRefresh: false,
+      sprintFilter: 'alpha',
+      fetchSprints,
+      fetchSprintIssues,
+      readStorage,
+      writeStorage
+    });
+
+    expect(result.sprintResults).toHaveLength(1);
+    expect(result.sprintResults[0].sprintName).toBe('ALPHA Sprint 1');
+  });
+
+  it('includes all sprints when sprintFilter is empty or null', async () => {
+    const readStorage = vi.fn().mockReturnValue(null);
+    const writeStorage = vi.fn();
+    const fetchSprints = vi.fn().mockResolvedValue([
+      { id: 100, name: 'Alpha Sprint 1', state: 'active', startDate: '2025-06-01', endDate: '2025-06-14', completeDate: null },
+      { id: 101, name: 'Beta Sprint 1', state: 'active', startDate: '2025-06-01', endDate: '2025-06-14', completeDate: null }
+    ]);
+    const fetchSprintIssues = vi.fn().mockResolvedValue([
+      { key: 'P-1', summary: 'Task', issueType: 'Task', activityType: 'New Features', storyPoints: 3, resolution: null }
+    ]);
+
+    // No filter
+    const result1 = await processBoard({
+      board: { id: 1, name: 'Board' },
+      hardRefresh: false,
+      fetchSprints,
+      fetchSprintIssues,
+      readStorage,
+      writeStorage
+    });
+    expect(result1.sprintResults).toHaveLength(2);
+
+    // Empty string filter
+    const result2 = await processBoard({
+      board: { id: 1, name: 'Board' },
+      hardRefresh: false,
+      sprintFilter: '',
+      fetchSprints,
+      fetchSprintIssues,
+      readStorage,
+      writeStorage
+    });
+    expect(result2.sprintResults).toHaveLength(2);
+
+    // Null filter
+    const result3 = await processBoard({
+      board: { id: 1, name: 'Board' },
+      hardRefresh: false,
+      sprintFilter: null,
+      fetchSprints,
+      fetchSprintIssues,
+      readStorage,
+      writeStorage
+    });
+    expect(result3.sprintResults).toHaveLength(2);
+  });
 });
 
 describe('performMultiProjectRefresh', () => {

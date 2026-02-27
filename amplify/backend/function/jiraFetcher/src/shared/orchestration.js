@@ -113,16 +113,25 @@ async function discoverBoards({ projectKey, fetchBoards, fetchSprints, readStora
  * @param {function} deps.writeStorage - (key, data) => void
  * @returns {Promise<{ board, sprintResults, dashboardSprint, dashboardSprintResult }>}
  */
-async function processBoard({ board, hardRefresh, fetchSprints, fetchSprintIssues, readStorage, writeStorage }) {
+async function processBoard({ board, hardRefresh, sprintFilter, fetchSprints, fetchSprintIssues, readStorage, writeStorage }) {
   const calculationMode = board.calculationMode || 'points';
-  console.log(`Processing board: ${board.name} (${board.id})`);
+  const displayName = sprintFilter ? `${board.name} [${sprintFilter}]` : board.name;
+  console.log(`Processing board: ${displayName} (${board.id})`);
 
   const sprints = await fetchSprints(board.id);
-  console.log(`  [${board.name}] Found ${sprints.length} sprints`);
+  console.log(`  [${displayName}] Found ${sprints.length} sprints`);
 
-  const activeSprints = sprints.filter(s => s.state === 'active');
-  const futureSprints = sprints.filter(s => s.state === 'future');
-  const closedSprints = sprints
+  // Apply sprint name filter if set
+  let filteredSprints = sprints;
+  if (sprintFilter?.trim()) {
+    const filterLower = sprintFilter.trim().toLowerCase();
+    filteredSprints = sprints.filter(s => s.name.toLowerCase().includes(filterLower));
+    console.log(`  [${displayName}] After filter "${sprintFilter}": ${filteredSprints.length} sprints`);
+  }
+
+  const activeSprints = filteredSprints.filter(s => s.state === 'active');
+  const futureSprints = filteredSprints.filter(s => s.state === 'future');
+  const closedSprints = filteredSprints
     .filter(s => s.state === 'closed')
     .sort((a, b) => new Date(b.completeDate || 0) - new Date(a.completeDate || 0))
     .slice(0, 5);
@@ -135,7 +144,7 @@ async function processBoard({ board, hardRefresh, fetchSprints, fetchSprintIssue
     if (!hardRefresh && sprint.state === 'closed') {
       const cached = await readStorage(`sprints/${sprint.id}.json`);
       if (cached) {
-        console.log(`  [${board.name}] Using cached data for closed sprint: ${sprint.name}`);
+        console.log(`  [${displayName}] Using cached data for closed sprint: ${sprint.name}`);
         sprintResults.push({
           sprintId: sprint.id,
           sprintName: sprint.name,
@@ -148,7 +157,7 @@ async function processBoard({ board, hardRefresh, fetchSprints, fetchSprintIssue
       }
     }
 
-    console.log(`  [${board.name}] Fetching sprint: ${sprint.name} (${sprint.state})`);
+    console.log(`  [${displayName}] Fetching sprint: ${sprint.name} (${sprint.state})`);
 
     const rawIssues = await fetchSprintIssues(sprint.id);
 
@@ -245,26 +254,34 @@ async function performRefresh({ projectKey, hardRefresh, fetchBoards, fetchSprin
   const allBoards = await fetchBoards(projectKey);
   console.log(`Found ${allBoards.length} scrum boards`);
 
-  // Filter to enabled boards only and attach calculationMode
+  // Filter to enabled boards/teams and attach calculationMode + sprintFilter
+  // A team entry can map to a board with an optional sprintFilter,
+  // allowing multiple teams to share the same board with different sprint name filters.
   const teamsData = await readStorage('teams.json');
-  let boards = allBoards;
+  let boardEntries = allBoards.map(b => ({ ...b }));
   if (teamsData && teamsData.teams) {
-    const teamMap = new Map(teamsData.teams.map(t => [t.boardId, t]));
-    boards = allBoards
-      .filter(b => {
-        const team = teamMap.get(b.id);
-        return !team || team.enabled !== false;
-      })
-      .map(b => {
-        const team = teamMap.get(b.id);
-        return {
-          ...b,
-          calculationMode: team?.calculationMode || 'points'
-        };
+    boardEntries = [];
+    for (const team of teamsData.teams) {
+      if (team.enabled === false) continue;
+      const board = allBoards.find(b => b.id === team.boardId);
+      if (!board) continue;
+      boardEntries.push({
+        ...board,
+        calculationMode: team.calculationMode || 'points',
+        sprintFilter: team.sprintFilter || undefined,
+        teamId: team.teamId || String(team.boardId)
       });
-    const skipped = allBoards.length - boards.length;
+    }
+    const skipped = teamsData.teams.filter(t => t.enabled === false).length;
     if (skipped > 0) {
       console.log(`Skipping ${skipped} disabled boards`);
+    }
+    // Add any boards not in teams config (new boards)
+    const configuredBoardIds = new Set(teamsData.teams.map(t => t.boardId));
+    for (const board of allBoards) {
+      if (!configuredBoardIds.has(board.id)) {
+        boardEntries.push({ ...board });
+      }
     }
   }
 
@@ -272,10 +289,10 @@ async function performRefresh({ projectKey, hardRefresh, fetchBoards, fetchSprin
   const CONCURRENCY = 2;
   const boardResults = [];
 
-  for (let i = 0; i < boards.length; i += CONCURRENCY) {
-    const chunk = boards.slice(i, i + CONCURRENCY);
-    const chunkResults = await Promise.all(chunk.map(board =>
-      processBoard({ board, hardRefresh, fetchSprints, fetchSprintIssues, readStorage, writeStorage })
+  for (let i = 0; i < boardEntries.length; i += CONCURRENCY) {
+    const chunk = boardEntries.slice(i, i + CONCURRENCY);
+    const chunkResults = await Promise.all(chunk.map(entry =>
+      processBoard({ board: entry, hardRefresh, sprintFilter: entry.sprintFilter, fetchSprints, fetchSprintIssues, readStorage, writeStorage })
     ));
     boardResults.push(...chunkResults);
   }
@@ -324,12 +341,12 @@ async function performRefresh({ projectKey, hardRefresh, fetchBoards, fetchSprin
 
   const allSprintResults = boardResults.flatMap(r => r.sprintResults);
   const refreshElapsed = ((Date.now() - refreshStart) / 1000).toFixed(1);
-  console.log(`Refresh complete: ${boards.length} boards, ${allSprintResults.length} sprints (${refreshElapsed}s)`);
+  console.log(`Refresh complete: ${boardEntries.length} boards, ${allSprintResults.length} sprints (${refreshElapsed}s)`);
 
   return {
     success: true,
     projectKey,
-    boardCount: boards.length,
+    boardCount: boardEntries.length,
     sprintCount: allSprintResults.length,
     dashboardSummary
   };
