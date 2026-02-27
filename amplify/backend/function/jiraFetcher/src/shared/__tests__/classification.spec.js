@@ -110,6 +110,43 @@ describe('buildSprintSummary', () => {
     const summary = buildSprintSummary(issues);
     expect(summary.totalPoints).toBe(0);
   });
+
+  it('calculates based on issue counts when mode is "counts"', () => {
+    const issues = [
+      { bucket: 'tech-debt-quality', storyPoints: 10, completed: false },
+      { bucket: 'tech-debt-quality', storyPoints: 5, completed: true },
+      { bucket: 'new-features', storyPoints: 20, completed: false },
+      { bucket: 'uncategorized', storyPoints: null, completed: false }
+    ];
+
+    const summary = buildSprintSummary(issues, 'counts');
+
+    // Should return counts, not points
+    expect(summary.totalCount).toBe(4);
+    expect(summary.estimatedIssueCount).toBe(3);
+    expect(summary.unestimatedIssueCount).toBe(1);
+
+    // Buckets should have counts as primary metric
+    expect(summary.buckets['tech-debt-quality'].count).toBe(2);
+    expect(summary.buckets['new-features'].count).toBe(1);
+    expect(summary.buckets['uncategorized'].count).toBe(1);
+
+    // Points should still be tracked for reference
+    expect(summary.totalPoints).toBe(35);
+    expect(summary.buckets['tech-debt-quality'].points).toBe(15);
+  });
+
+  it('defaults to "points" mode when no mode specified', () => {
+    const issues = [
+      { bucket: 'new-features', storyPoints: 5, completed: false },
+      { bucket: 'new-features', storyPoints: 3, completed: false }
+    ];
+
+    const summaryDefault = buildSprintSummary(issues);
+    const summaryExplicit = buildSprintSummary(issues, 'points');
+
+    expect(summaryDefault).toEqual(summaryExplicit);
+  });
 });
 
 describe('getLatestSprintEndDate', () => {
@@ -277,6 +314,51 @@ describe('buildProjectSummary', () => {
     const result = buildProjectSummary([makeBoardSummary()]);
     expect(result.totalPoints).toBe(10);
     expect(result.boardCount).toBe(1);
+  });
+
+  it('calculates weighted percentages when boards have mixed calculation modes', () => {
+    const summaries = [
+      // Team A: points mode - 10 points total, 40% tech-debt (4 pts)
+      {
+        totalPoints: 10,
+        totalCount: 0,
+        calculationMode: 'points',
+        estimatedIssueCount: 5,
+        unestimatedIssueCount: 0,
+        buckets: {
+          'tech-debt-quality': { points: 4, count: 0, issueCount: 2, completedPoints: 0 },
+          'new-features': { points: 4, count: 0, issueCount: 2, completedPoints: 0 },
+          'learning-enablement': { points: 2, count: 0, issueCount: 1, completedPoints: 0 },
+          'uncategorized': { points: 0, count: 0, issueCount: 0, completedPoints: 0 }
+        }
+      },
+      // Team B: counts mode - 5 issues total, 60% tech-debt (3 issues)
+      {
+        totalPoints: 0,
+        totalCount: 5,
+        calculationMode: 'counts',
+        estimatedIssueCount: 5,
+        unestimatedIssueCount: 0,
+        buckets: {
+          'tech-debt-quality': { points: 0, count: 3, issueCount: 3, completedPoints: 0 },
+          'new-features': { points: 0, count: 1, issueCount: 1, completedPoints: 0 },
+          'learning-enablement': { points: 0, count: 1, issueCount: 1, completedPoints: 0 },
+          'uncategorized': { points: 0, count: 0, issueCount: 0, completedPoints: 0 }
+        }
+      }
+    ];
+
+    const result = buildProjectSummary(summaries);
+
+    // Weighted percentage: (10*0.4 + 5*0.6) / (10 + 5) = (4 + 3) / 15 = 46.67%
+    expect(result.percentages['tech-debt-quality']).toBeCloseTo(46.67, 1);
+
+    // Weighted percentage: (10*0.4 + 5*0.2) / (10 + 5) = (4 + 1) / 15 = 33.33%
+    expect(result.percentages['new-features']).toBeCloseTo(33.33, 1);
+
+    // Totals should still be aggregated
+    expect(result.totalPoints).toBe(10);
+    expect(result.totalCount).toBe(5);
   });
 });
 

@@ -141,7 +141,7 @@ describe('performRefresh', () => {
         { id: 100, name: 'Sprint 1', state: 'active', startDate: '2025-06-01', endDate: '2025-06-14', completeDate: null }
       ]),
       fetchSprintIssues: vi.fn().mockResolvedValue([
-        { key: 'P-1', summary: 'Bug', activityType: 'Tech Debt & Quality', storyPoints: 3, resolution: { name: 'Done' } }
+        { key: 'P-1', summary: 'Bug', issueType: 'Bug', activityType: 'Tech Debt & Quality', storyPoints: 3, resolution: { name: 'Done' } }
       ]),
       readStorage: vi.fn().mockReturnValue(null)
     });
@@ -283,7 +283,7 @@ describe('processBoard', () => {
       { id: 100, name: 'Sprint 1', state: 'active', startDate: '2025-06-01', endDate: '2025-06-14', completeDate: null }
     ]);
     const fetchSprintIssues = vi.fn().mockResolvedValue([
-      { key: 'P-1', summary: 'Bug', activityType: 'Tech Debt & Quality', storyPoints: 3, resolution: { name: 'Done' } }
+      { key: 'P-1', summary: 'Bug', issueType: 'Bug', activityType: 'Tech Debt & Quality', storyPoints: 3, resolution: { name: 'Done' } }
     ]);
 
     const result = await processBoard({
@@ -303,6 +303,98 @@ describe('processBoard', () => {
     // Sprint data written
     const sprintCall = writeStorage.mock.calls.find(c => c[0] === 'sprints/100.json');
     expect(sprintCall).toBeDefined();
+  });
+
+  it('filters out Sub-task issue types', async () => {
+    const readStorage = vi.fn().mockReturnValue(null);
+    const writeStorage = vi.fn();
+    const fetchSprints = vi.fn().mockResolvedValue([
+      { id: 100, name: 'Sprint 1', state: 'active', startDate: '2025-06-01', endDate: '2025-06-14', completeDate: null }
+    ]);
+    const fetchSprintIssues = vi.fn().mockResolvedValue([
+      { key: 'P-1', summary: 'Task', issueType: 'Task', activityType: 'New Features', storyPoints: 5, resolution: null },
+      { key: 'P-2', summary: 'Subtask', issueType: 'Sub-task', activityType: 'New Features', storyPoints: 2, resolution: null },
+      { key: 'P-3', summary: 'Bug', issueType: 'Bug', activityType: 'Tech Debt & Quality', storyPoints: 3, resolution: null }
+    ]);
+
+    const result = await processBoard({
+      board: { id: 1, name: 'Board A' },
+      hardRefresh: false,
+      fetchSprints,
+      fetchSprintIssues,
+      readStorage,
+      writeStorage
+    });
+
+    // Only 2 issues should be processed (Sub-task excluded)
+    expect(result.dashboardSprintResult.summary.totalPoints).toBe(8);
+    expect(result.dashboardSprintResult.issueCount).toBe(2);
+
+    const sprintCall = writeStorage.mock.calls.find(c => c[0] === 'sprints/100.json');
+    expect(sprintCall[1].issues).toHaveLength(2);
+    expect(sprintCall[1].issues.find(i => i.issueType === 'Sub-task')).toBeUndefined();
+  });
+
+  it('filters out Epic and Initiative issue types', async () => {
+    const readStorage = vi.fn().mockReturnValue(null);
+    const writeStorage = vi.fn();
+    const fetchSprints = vi.fn().mockResolvedValue([
+      { id: 100, name: 'Sprint 1', state: 'active', startDate: '2025-06-01', endDate: '2025-06-14', completeDate: null }
+    ]);
+    const fetchSprintIssues = vi.fn().mockResolvedValue([
+      { key: 'P-1', summary: 'Story', issueType: 'Story', activityType: 'New Features', storyPoints: 5, resolution: null },
+      { key: 'P-2', summary: 'Epic', issueType: 'Epic', activityType: 'New Features', storyPoints: 50, resolution: null },
+      { key: 'P-3', summary: 'Initiative', issueType: 'Initiative', activityType: 'New Features', storyPoints: 100, resolution: null }
+    ]);
+
+    const result = await processBoard({
+      board: { id: 1, name: 'Board A' },
+      hardRefresh: false,
+      fetchSprints,
+      fetchSprintIssues,
+      readStorage,
+      writeStorage
+    });
+
+    // Only Story should be processed
+    expect(result.dashboardSprintResult.summary.totalPoints).toBe(5);
+    expect(result.dashboardSprintResult.issueCount).toBe(1);
+
+    const sprintCall = writeStorage.mock.calls.find(c => c[0] === 'sprints/100.json');
+    expect(sprintCall[1].issues).toHaveLength(1);
+    expect(sprintCall[1].issues[0].issueType).toBe('Story');
+  });
+
+  it('includes all allowed issue types', async () => {
+    const readStorage = vi.fn().mockReturnValue(null);
+    const writeStorage = vi.fn();
+    const fetchSprints = vi.fn().mockResolvedValue([
+      { id: 100, name: 'Sprint 1', state: 'active', startDate: '2025-06-01', endDate: '2025-06-14', completeDate: null }
+    ]);
+    const fetchSprintIssues = vi.fn().mockResolvedValue([
+      { key: 'P-1', summary: 'Bug', issueType: 'Bug', activityType: 'Tech Debt & Quality', storyPoints: 1, resolution: null },
+      { key: 'P-2', summary: 'Task', issueType: 'Task', activityType: 'New Features', storyPoints: 2, resolution: null },
+      { key: 'P-3', summary: 'Story', issueType: 'Story', activityType: 'New Features', storyPoints: 3, resolution: null },
+      { key: 'P-4', summary: 'Spike', issueType: 'Spike', activityType: 'Learning & Enablement', storyPoints: 4, resolution: null },
+      { key: 'P-5', summary: 'Vuln', issueType: 'Vulnerability', activityType: 'Tech Debt & Quality', storyPoints: 5, resolution: null },
+      { key: 'P-6', summary: 'Weak', issueType: 'Weakness', activityType: 'Tech Debt & Quality', storyPoints: 6, resolution: null }
+    ]);
+
+    const result = await processBoard({
+      board: { id: 1, name: 'Board A' },
+      hardRefresh: false,
+      fetchSprints,
+      fetchSprintIssues,
+      readStorage,
+      writeStorage
+    });
+
+    // All 6 allowed types should be included
+    expect(result.dashboardSprintResult.summary.totalPoints).toBe(21);
+    expect(result.dashboardSprintResult.issueCount).toBe(6);
+
+    const sprintCall = writeStorage.mock.calls.find(c => c[0] === 'sprints/100.json');
+    expect(sprintCall[1].issues).toHaveLength(6);
   });
 
   it('uses cached closed sprint data when not hard refresh', async () => {
@@ -344,7 +436,7 @@ describe('performMultiProjectRefresh', () => {
       { id: 100, name: 'Sprint 1', state: 'active', startDate: '2025-06-01', endDate: '2025-06-14', completeDate: null }
     ]);
     const fetchSprintIssues = vi.fn().mockResolvedValue([
-      { key: 'P-1', summary: 'Bug', activityType: 'Tech Debt & Quality', storyPoints: 3, resolution: null }
+      { key: 'P-1', summary: 'Bug', issueType: 'Bug', activityType: 'Tech Debt & Quality', storyPoints: 3, resolution: null }
     ]);
 
     const result = await performMultiProjectRefresh({
@@ -385,7 +477,7 @@ describe('performMultiProjectRefresh', () => {
       { id: 100, name: 'Sprint 1', state: 'active', startDate: '2025-06-01', endDate: '2025-06-14', completeDate: null }
     ]);
     const fetchSprintIssues = vi.fn().mockResolvedValue([
-      { key: 'P-1', summary: 'Feature', activityType: 'New Features', storyPoints: 5, resolution: null }
+      { key: 'P-1', summary: 'Feature', issueType: 'Story', activityType: 'New Features', storyPoints: 5, resolution: null }
     ]);
 
     await performMultiProjectRefresh({

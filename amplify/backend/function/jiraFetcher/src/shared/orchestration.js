@@ -9,6 +9,12 @@ const { classifyIssue, buildSprintSummary, buildProjectSummary, buildOrgSummary,
 const { getStoragePrefix, createPrefixedStorage } = require('./config');
 
 /**
+ * Allowed issue types for calculation.
+ * Excludes Sub-task, Epic, Initiative, and other meta-level issue types.
+ */
+const ALLOWED_ISSUE_TYPES = ['Bug', 'Task', 'Story', 'Spike', 'Vulnerability', 'Weakness'];
+
+/**
  * Discover boards from Jira, determine staleness, and merge with existing team config.
  *
  * @param {object} deps
@@ -99,7 +105,7 @@ async function discoverBoards({ projectKey, fetchBoards, fetchSprints, readStora
  * or as part of a larger refresh.
  *
  * @param {object} deps
- * @param {object} deps.board - { id, name }
+ * @param {object} deps.board - { id, name, calculationMode? }
  * @param {boolean} deps.hardRefresh
  * @param {function} deps.fetchSprints - (boardId) => Promise<Sprint[]>
  * @param {function} deps.fetchSprintIssues - (sprintId) => Promise<Issue[]>
@@ -108,6 +114,7 @@ async function discoverBoards({ projectKey, fetchBoards, fetchSprints, readStora
  * @returns {Promise<{ board, sprintResults, dashboardSprint, dashboardSprintResult }>}
  */
 async function processBoard({ board, hardRefresh, fetchSprints, fetchSprintIssues, readStorage, writeStorage }) {
+  const calculationMode = board.calculationMode || 'points';
   console.log(`Processing board: ${board.name} (${board.id})`);
 
   const sprints = await fetchSprints(board.id);
@@ -145,15 +152,22 @@ async function processBoard({ board, hardRefresh, fetchSprints, fetchSprintIssue
 
     const rawIssues = await fetchSprintIssues(sprint.id);
 
-    const classifiedIssues = rawIssues.map(issue => ({
+    // Filter to only allowed issue types
+    const filteredIssues = rawIssues.filter(issue =>
+      ALLOWED_ISSUE_TYPES.includes(issue.issueType)
+    );
+
+    const classifiedIssues = filteredIssues.map(issue => ({
       ...issue,
       bucket: classifyIssue(issue),
       completed: issue.resolution != null
     }));
 
-    const summary = buildSprintSummary(classifiedIssues);
+    const summary = buildSprintSummary(classifiedIssues, calculationMode);
 
-    console.log(`    ${classifiedIssues.length} issues, ${summary.totalPoints} pts | tech-debt: ${summary.buckets['tech-debt-quality'].points} pts, features: ${summary.buckets['new-features'].points} pts, learning: ${summary.buckets['learning-enablement'].points} pts, uncategorized: ${summary.buckets['uncategorized'].points} pts | ${summary.unestimatedIssueCount} unestimated`);
+    const filteredCount = rawIssues.length - filteredIssues.length;
+    const filterMsg = filteredCount > 0 ? ` (${filteredCount} filtered)` : '';
+    console.log(`    ${classifiedIssues.length} issues${filterMsg}, ${summary.totalPoints} pts | tech-debt: ${summary.buckets['tech-debt-quality'].points} pts, features: ${summary.buckets['new-features'].points} pts, learning: ${summary.buckets['learning-enablement'].points} pts, uncategorized: ${summary.buckets['uncategorized'].points} pts | ${summary.unestimatedIssueCount} unestimated`);
 
     const sprintData = {
       sprintId: sprint.id,
@@ -231,15 +245,23 @@ async function performRefresh({ projectKey, hardRefresh, fetchBoards, fetchSprin
   const allBoards = await fetchBoards(projectKey);
   console.log(`Found ${allBoards.length} scrum boards`);
 
-  // Filter to enabled boards only
+  // Filter to enabled boards only and attach calculationMode
   const teamsData = await readStorage('teams.json');
   let boards = allBoards;
   if (teamsData && teamsData.teams) {
     const teamMap = new Map(teamsData.teams.map(t => [t.boardId, t]));
-    boards = allBoards.filter(b => {
-      const team = teamMap.get(b.id);
-      return !team || team.enabled !== false;
-    });
+    boards = allBoards
+      .filter(b => {
+        const team = teamMap.get(b.id);
+        return !team || team.enabled !== false;
+      })
+      .map(b => {
+        const team = teamMap.get(b.id);
+        return {
+          ...b,
+          calculationMode: team?.calculationMode || 'points'
+        };
+      });
     const skipped = allBoards.length - boards.length;
     if (skipped > 0) {
       console.log(`Skipping ${skipped} disabled boards`);

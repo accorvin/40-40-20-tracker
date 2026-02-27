@@ -238,7 +238,7 @@
               team.stale ? 'opacity-60' : ''
             ]"
           >
-            <div>
+            <div class="flex-1">
               <div class="flex items-center gap-2">
                 <span class="font-medium text-gray-900">{{ team.displayName || team.boardName }}</span>
                 <span class="ml-2 text-sm text-gray-500">ID: {{ team.boardId }}</span>
@@ -253,15 +253,29 @@
                 {{ team.lastSprintEndDate ? `Last sprint ended ${formatRelativeDate(team.lastSprintEndDate)}` : 'No sprints found' }}
               </p>
             </div>
-            <label class="relative inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                :checked="team.enabled"
-                @change="toggleTeam(team.boardId)"
-                class="sr-only peer"
-              />
-              <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
-            </label>
+            <div class="flex items-center gap-4">
+              <div class="flex items-center gap-2">
+                <span class="text-xs text-gray-500">Calculate by:</span>
+                <select
+                  v-model="team.calculationMode"
+                  @change="updateCalculationMode(team.boardId, team.calculationMode)"
+                  class="text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary-300"
+                  data-testid="calculation-mode-select"
+                >
+                  <option value="points">Story Points</option>
+                  <option value="counts">Issue Counts</option>
+                </select>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  :checked="team.enabled"
+                  @change="toggleTeam(team.boardId)"
+                  class="sr-only peer"
+                />
+                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
+              </label>
+            </div>
           </div>
         </div>
       </div>
@@ -404,7 +418,10 @@ async function handleSaveProjects() {
 async function loadTeams() {
   try {
     const data = await getTeams()
-    teams.value = (data.teams || []).map(t => ({ ...t }))
+    teams.value = (data.teams || []).map(t => ({
+      ...t,
+      calculationMode: t.calculationMode || 'points'
+    }))
   } catch (error) {
     console.error('Failed to load teams:', error)
     teams.value = []
@@ -415,6 +432,13 @@ function toggleTeam(boardId) {
   const team = teams.value.find(t => t.boardId === boardId)
   if (team) {
     team.enabled = !team.enabled
+  }
+}
+
+function updateCalculationMode(boardId, mode) {
+  const team = teams.value.find(t => t.boardId === boardId)
+  if (team) {
+    team.calculationMode = mode
   }
 }
 

@@ -26,16 +26,19 @@ function classifyIssue(issue) {
 
 /**
  * Build sprint summary from classified issues
+ * @param {Array} issues - Classified issues
+ * @param {string} calculationMode - 'points' (default) or 'counts'
  */
-function buildSprintSummary(issues) {
+function buildSprintSummary(issues, calculationMode = 'points') {
   const buckets = {
-    'tech-debt-quality': { points: 0, issueCount: 0, completedPoints: 0 },
-    'new-features': { points: 0, issueCount: 0, completedPoints: 0 },
-    'learning-enablement': { points: 0, issueCount: 0, completedPoints: 0 },
-    'uncategorized': { points: 0, issueCount: 0, completedPoints: 0 }
+    'tech-debt-quality': { points: 0, count: 0, issueCount: 0, completedPoints: 0, completedCount: 0 },
+    'new-features': { points: 0, count: 0, issueCount: 0, completedPoints: 0, completedCount: 0 },
+    'learning-enablement': { points: 0, count: 0, issueCount: 0, completedPoints: 0, completedCount: 0 },
+    'uncategorized': { points: 0, count: 0, issueCount: 0, completedPoints: 0, completedCount: 0 }
   };
 
   let totalPoints = 0;
+  let totalCount = 0;
   let estimatedIssueCount = 0;
   let unestimatedIssueCount = 0;
 
@@ -44,6 +47,12 @@ function buildSprintSummary(issues) {
     if (!bucket) return;
 
     bucket.issueCount++;
+    bucket.count++;
+    totalCount++;
+
+    if (issue.completed) {
+      bucket.completedCount++;
+    }
 
     if (issue.storyPoints != null) {
       bucket.points += issue.storyPoints;
@@ -59,7 +68,9 @@ function buildSprintSummary(issues) {
   });
 
   return {
+    calculationMode,
     totalPoints,
+    totalCount,
     estimatedIssueCount,
     unestimatedIssueCount,
     buckets
@@ -130,10 +141,10 @@ function determineStaleness(sprints, now = new Date()) {
  */
 function emptyBuckets() {
   return {
-    'tech-debt-quality': { points: 0, issueCount: 0, completedPoints: 0 },
-    'new-features': { points: 0, issueCount: 0, completedPoints: 0 },
-    'learning-enablement': { points: 0, issueCount: 0, completedPoints: 0 },
-    'uncategorized': { points: 0, issueCount: 0, completedPoints: 0 }
+    'tech-debt-quality': { points: 0, count: 0, issueCount: 0, completedPoints: 0, completedCount: 0 },
+    'new-features': { points: 0, count: 0, issueCount: 0, completedPoints: 0, completedCount: 0 },
+    'learning-enablement': { points: 0, count: 0, issueCount: 0, completedPoints: 0, completedCount: 0 },
+    'uncategorized': { points: 0, count: 0, issueCount: 0, completedPoints: 0, completedCount: 0 }
   };
 }
 
@@ -145,24 +156,30 @@ function addBuckets(target, source) {
     const s = source[key];
     if (!s) continue;
     target[key].points += s.points || 0;
+    target[key].count += s.count || 0;
     target[key].issueCount += s.issueCount || 0;
     target[key].completedPoints += s.completedPoints || 0;
+    target[key].completedCount += s.completedCount || 0;
   }
 }
 
 /**
  * Build a project-level summary by aggregating across board summaries.
+ * Supports weighted percentages for mixed calculation modes.
  * @param {Array} boardSummaries - Array of sprint summary objects (from buildSprintSummary)
- * @returns {object} Aggregated summary with totalPoints, boardCount, buckets, etc.
+ * @returns {object} Aggregated summary with totalPoints, boardCount, buckets, percentages, etc.
  */
 function buildProjectSummary(boardSummaries) {
   const buckets = emptyBuckets();
   let totalPoints = 0;
+  let totalCount = 0;
   let estimatedIssueCount = 0;
   let unestimatedIssueCount = 0;
 
+  // Aggregate raw values
   for (const summary of boardSummaries) {
     totalPoints += summary.totalPoints || 0;
+    totalCount += summary.totalCount || 0;
     estimatedIssueCount += summary.estimatedIssueCount || 0;
     unestimatedIssueCount += summary.unestimatedIssueCount || 0;
     if (summary.buckets) {
@@ -170,29 +187,78 @@ function buildProjectSummary(boardSummaries) {
     }
   }
 
+  // Calculate weighted percentages for mixed-mode rollup
+  const percentages = {
+    'tech-debt-quality': 0,
+    'new-features': 0,
+    'learning-enablement': 0,
+    'uncategorized': 0
+  };
+
+  let totalWeight = 0;
+  const bucketWeights = {
+    'tech-debt-quality': 0,
+    'new-features': 0,
+    'learning-enablement': 0,
+    'uncategorized': 0
+  };
+
+  for (const summary of boardSummaries) {
+    const weight = (summary.calculationMode === 'counts')
+      ? (summary.totalCount || 0)
+      : (summary.totalPoints || 0);
+
+    if (weight === 0) continue;
+
+    totalWeight += weight;
+
+    for (const bucketKey of Object.keys(bucketWeights)) {
+      const bucket = summary.buckets?.[bucketKey];
+      if (!bucket) continue;
+
+      const value = (summary.calculationMode === 'counts')
+        ? (bucket.count || 0)
+        : (bucket.points || 0);
+
+      bucketWeights[bucketKey] += value;
+    }
+  }
+
+  // Calculate final percentages
+  if (totalWeight > 0) {
+    for (const bucketKey of Object.keys(percentages)) {
+      percentages[bucketKey] = (bucketWeights[bucketKey] / totalWeight) * 100;
+    }
+  }
+
   return {
     totalPoints,
+    totalCount,
     boardCount: boardSummaries.length,
     estimatedIssueCount,
     unestimatedIssueCount,
-    buckets
+    buckets,
+    percentages
   };
 }
 
 /**
  * Build an org-level summary by aggregating across project summaries.
+ * Inherits weighted percentages from project-level summaries.
  * @param {Array} projectSummaries - Array of project summary objects (from buildProjectSummary)
- * @returns {object} Aggregated summary with totalPoints, projectCount, boardCount, buckets, etc.
+ * @returns {object} Aggregated summary with totalPoints, projectCount, boardCount, buckets, percentages, etc.
  */
 function buildOrgSummary(projectSummaries) {
   const buckets = emptyBuckets();
   let totalPoints = 0;
+  let totalCount = 0;
   let boardCount = 0;
   let estimatedIssueCount = 0;
   let unestimatedIssueCount = 0;
 
   for (const summary of projectSummaries) {
     totalPoints += summary.totalPoints || 0;
+    totalCount += summary.totalCount || 0;
     boardCount += summary.boardCount || 0;
     estimatedIssueCount += summary.estimatedIssueCount || 0;
     unestimatedIssueCount += summary.unestimatedIssueCount || 0;
@@ -201,13 +267,31 @@ function buildOrgSummary(projectSummaries) {
     }
   }
 
+  // Calculate weighted percentages across projects
+  const percentages = {
+    'tech-debt-quality': 0,
+    'new-features': 0,
+    'learning-enablement': 0,
+    'uncategorized': 0
+  };
+
+  const totalWeight = totalPoints + totalCount;
+  if (totalWeight > 0) {
+    for (const bucketKey of Object.keys(percentages)) {
+      const bucketTotal = buckets[bucketKey].points + buckets[bucketKey].count;
+      percentages[bucketKey] = (bucketTotal / totalWeight) * 100;
+    }
+  }
+
   return {
     totalPoints,
+    totalCount,
     projectCount: projectSummaries.length,
     boardCount,
     estimatedIssueCount,
     unestimatedIssueCount,
-    buckets
+    buckets,
+    percentages
   };
 }
 
