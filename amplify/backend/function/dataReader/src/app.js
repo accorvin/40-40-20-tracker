@@ -208,20 +208,22 @@ app.get('/boards', async function(req, res) {
       return res.json({ boards: [], lastUpdated: null });
     }
 
-    // Merge with team config for display names
+    // Build board-like entries from teams config (one entry per team, supporting sub-teams)
     const teamsData = await readWithFallback(project, 'teams.json');
     if (teamsData && teamsData.teams) {
-      const teamMap = new Map(teamsData.teams.map(t => [t.boardId, t]));
-      data.boards = data.boards
-        .map(board => {
-          const teamConfig = teamMap.get(board.id);
+      const boardMap = new Map(data.boards.map(b => [b.id, b]));
+      data.boards = teamsData.teams
+        .filter(t => t.enabled !== false)
+        .map(t => {
+          const board = boardMap.get(t.boardId) || {};
           return {
             ...board,
-            displayName: teamConfig?.displayName || board.name,
-            enabled: teamConfig?.enabled !== false
+            id: t.teamId || String(t.boardId),
+            boardId: t.boardId,
+            name: t.boardName || board.name,
+            displayName: t.displayName || t.boardName || board.name
           };
-        })
-        .filter(board => board.enabled);
+        });
     }
 
     res.json(data);
@@ -248,7 +250,11 @@ app.get('/boards/:boardId/sprints', async function(req, res) {
     const project = req.query.project || null;
     console.log(`Reading sprints for board ${boardId} (user: ${verification.email})`);
 
-    const data = await readWithFallback(project, `sprints/board-${boardId}.json`);
+    // Try team-based key first, fall back to old board-based key for backward compat
+    let data = await readWithFallback(project, `sprints/team-${boardId}.json`);
+    if (!data) {
+      data = await readWithFallback(project, `sprints/board-${boardId}.json`);
+    }
 
     if (!data) {
       return res.json({ sprints: [] });

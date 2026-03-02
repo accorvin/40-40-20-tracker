@@ -220,6 +220,9 @@
             >
               {{ isSaving ? 'Saving...' : 'Save' }}
             </button>
+            <span v-if="saveValidationError" class="text-xs text-red-600">
+              All sub-team entries require a name.
+            </span>
           </div>
         </div>
 
@@ -230,51 +233,130 @@
 
         <div v-else class="divide-y divide-gray-200">
           <div
-            v-for="team in sortedTeams"
-            :key="team.boardId"
-            data-testid="team-row"
+            v-for="group in groupedBoards"
+            :key="group.boardId"
+            data-testid="board-group"
             :class="[
-              'flex items-center justify-between py-3 px-3 rounded-md hover:bg-primary-50 even:bg-gray-50 transition-colors',
-              team.stale ? 'opacity-60' : ''
+              'py-3 px-3 rounded-md hover:bg-primary-50 even:bg-gray-50 transition-colors',
+              group.stale ? 'opacity-60' : ''
             ]"
           >
-            <div class="flex-1">
-              <div class="flex items-center gap-2">
-                <span class="font-medium text-gray-900">{{ team.displayName || team.boardName }}</span>
-                <span class="ml-2 text-sm text-gray-500">ID: {{ team.boardId }}</span>
-                <span
-                  v-if="team.stale"
-                  class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600"
-                >
-                  Inactive
-                </span>
+            <!-- Board group header -->
+            <div class="flex items-center justify-between">
+              <div class="flex-1">
+                <div class="flex items-center gap-2">
+                  <span class="font-medium text-gray-900">{{ group.displayName || group.boardName }}</span>
+                  <span class="ml-2 text-sm text-gray-500">ID: {{ group.boardId }}</span>
+                  <span
+                    v-if="group.stale"
+                    class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600"
+                  >
+                    Inactive
+                  </span>
+                </div>
+                <p v-if="group.stale" class="text-xs text-gray-400 mt-0.5">
+                  {{ group.lastSprintEndDate ? `Last sprint ended ${formatRelativeDate(group.lastSprintEndDate)}` : 'No sprints found' }}
+                </p>
               </div>
-              <p v-if="team.stale" class="text-xs text-gray-400 mt-0.5">
-                {{ team.lastSprintEndDate ? `Last sprint ended ${formatRelativeDate(team.lastSprintEndDate)}` : 'No sprints found' }}
-              </p>
+              <div class="flex items-center gap-4">
+                <!-- Simple board (single entry, no sub-teams): show controls inline -->
+                <template v-if="!group.hasSubTeams">
+                  <div class="flex items-center gap-2">
+                    <span class="text-xs text-gray-500">Calculate by:</span>
+                    <select
+                      :value="group.entries[0].calculationMode"
+                      @change="updateCalculationMode(group.entries[0]._index, $event.target.value)"
+                      class="text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary-300"
+                      data-testid="calculation-mode-select"
+                    >
+                      <option value="points">Story Points</option>
+                      <option value="counts">Issue Counts</option>
+                    </select>
+                  </div>
+                  <label class="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      :checked="group.entries[0].enabled"
+                      @change="toggleTeam(group.entries[0]._index)"
+                      class="sr-only peer"
+                    />
+                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
+                  </label>
+                </template>
+                <button
+                  data-testid="add-sub-team-btn"
+                  @click="addSubTeam(group.boardId, group.boardName)"
+                  class="text-xs text-primary-600 hover:text-primary-800 font-medium whitespace-nowrap"
+                >
+                  + Sub-Team
+                </button>
+              </div>
             </div>
-            <div class="flex items-center gap-4">
-              <div class="flex items-center gap-2">
-                <span class="text-xs text-gray-500">Calculate by:</span>
-                <select
-                  v-model="team.calculationMode"
-                  @change="updateCalculationMode(team.boardId, team.calculationMode)"
-                  class="text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary-300"
-                  data-testid="calculation-mode-select"
-                >
-                  <option value="points">Story Points</option>
-                  <option value="counts">Issue Counts</option>
-                </select>
+
+            <!-- Sub-team rows (only shown when board has multiple entries or filters) -->
+            <div v-if="group.hasSubTeams" class="ml-6 mt-2 space-y-2 border-l-2 border-gray-200 pl-4">
+              <div
+                v-for="(entry, entryIndex) in group.entries"
+                :key="entry._index"
+                data-testid="sub-team-row"
+                class="flex items-center justify-between py-1.5"
+              >
+                <div class="flex items-center gap-3 flex-1">
+                  <div class="flex items-center gap-2">
+                    <span class="text-xs text-gray-500">Name:</span>
+                    <input
+                      :value="entry.displayName"
+                      @input="teams[entry._index].displayName = $event.target.value"
+                      placeholder="Sub-team name"
+                      data-testid="sub-team-name-input"
+                      :class="[
+                        'text-xs border rounded px-2 py-1 w-32 focus:outline-none focus:ring-1 focus:ring-primary-300',
+                        !entry.displayName?.trim() && saveValidationFailed ? 'border-red-400' : 'border-gray-300'
+                      ]"
+                    />
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <span class="text-xs text-gray-500">Filter:</span>
+                    <input
+                      :value="entry.sprintFilter"
+                      @input="teams[entry._index].sprintFilter = $event.target.value"
+                      placeholder="Sprint name filter"
+                      data-testid="sprint-filter-input"
+                      class="text-xs border border-gray-300 rounded px-2 py-1 w-32 focus:outline-none focus:ring-1 focus:ring-primary-300"
+                    />
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <span class="text-xs text-gray-500">Calculate by:</span>
+                    <select
+                      :value="entry.calculationMode"
+                      @change="updateCalculationMode(entry._index, $event.target.value)"
+                      class="text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary-300"
+                      data-testid="calculation-mode-select"
+                    >
+                      <option value="points">Story Points</option>
+                      <option value="counts">Issue Counts</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="flex items-center gap-3">
+                  <button
+                    data-testid="remove-sub-team-btn"
+                    @click="deleteSubTeam(entry._index)"
+                    class="text-xs text-red-600 hover:text-red-800 font-medium"
+                  >
+                    Remove
+                  </button>
+                  <label class="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      :checked="entry.enabled"
+                      @change="toggleTeam(entry._index)"
+                      class="sr-only peer"
+                    />
+                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
+                  </label>
+                </div>
               </div>
-              <label class="relative inline-flex items-center cursor-pointer">
-                <input
-                  type="checkbox"
-                  :checked="team.enabled"
-                  @change="toggleTeam(team.boardId)"
-                  class="sr-only peer"
-                />
-                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
-              </label>
             </div>
           </div>
         </div>
@@ -315,6 +397,8 @@ const teams = ref([])
 const isSaving = ref(false)
 const isDiscovering = ref(false)
 const selectedProjectKey = ref('')
+const saveValidationFailed = ref(false)
+const saveValidationError = ref('')
 
 // Initialize
 onMounted(() => {
@@ -329,12 +413,44 @@ watch(selectedProjectKey, () => {
   loadTeams()
 })
 
-const sortedTeams = computed(() => {
-  return [...teams.value].sort((a, b) => {
+function generateTeamId(boardId, sprintFilter) {
+  if (!sprintFilter?.trim()) return String(boardId)
+  const normalized = sprintFilter.trim().toLowerCase().replace(/\s+/g, '-')
+  return `${boardId}_${normalized}`
+}
+
+const groupedBoards = computed(() => {
+  // Group teams by boardId, preserving original indices
+  const groups = new Map()
+  teams.value.forEach((t, i) => {
+    const entry = { ...t, _index: i }
+    if (!groups.has(t.boardId)) {
+      groups.set(t.boardId, {
+        boardId: t.boardId,
+        boardName: t.boardName,
+        displayName: t.displayName || t.boardName,
+        stale: t.stale,
+        lastSprintEndDate: t.lastSprintEndDate,
+        entries: []
+      })
+    }
+    groups.get(t.boardId).entries.push(entry)
+  })
+
+  // A board "has sub-teams" if it has multiple entries or any entry has a filter
+  const result = [...groups.values()].map(g => ({
+    ...g,
+    hasSubTeams: g.entries.length > 1 || g.entries.some(e => e.sprintFilter?.trim())
+  }))
+
+  // Sort stale boards to the bottom
+  result.sort((a, b) => {
     if (a.stale && !b.stale) return 1
     if (!a.stale && b.stale) return -1
     return 0
   })
+
+  return result
 })
 
 function formatRelativeDate(dateStr) {
@@ -420,7 +536,8 @@ async function loadTeams() {
     const data = await getTeams()
     teams.value = (data.teams || []).map(t => ({
       ...t,
-      calculationMode: t.calculationMode || 'points'
+      calculationMode: t.calculationMode || 'points',
+      sprintFilter: t.sprintFilter || ''
     }))
   } catch (error) {
     console.error('Failed to load teams:', error)
@@ -428,24 +545,73 @@ async function loadTeams() {
   }
 }
 
-function toggleTeam(boardId) {
-  const team = teams.value.find(t => t.boardId === boardId)
-  if (team) {
-    team.enabled = !team.enabled
+function toggleTeam(index) {
+  if (teams.value[index]) {
+    teams.value[index].enabled = !teams.value[index].enabled
   }
 }
 
-function updateCalculationMode(boardId, mode) {
-  const team = teams.value.find(t => t.boardId === boardId)
-  if (team) {
-    team.calculationMode = mode
+function updateCalculationMode(index, mode) {
+  if (teams.value[index]) {
+    teams.value[index].calculationMode = mode
   }
+}
+
+function addSubTeam(boardId, boardName) {
+  // Find the insertion point: right after the last entry for this boardId
+  let lastIndex = -1
+  teams.value.forEach((t, i) => {
+    if (t.boardId === boardId) lastIndex = i
+  })
+
+  const newEntry = {
+    boardId,
+    boardName,
+    displayName: boardName?.replace(/^RHOAIENG\s*[-–]\s*/, '') || '',
+    enabled: true,
+    sprintFilter: '',
+    calculationMode: 'points'
+  }
+
+  if (lastIndex >= 0) {
+    teams.value.splice(lastIndex + 1, 0, newEntry)
+  } else {
+    teams.value.push(newEntry)
+  }
+}
+
+function deleteSubTeam(index) {
+  teams.value.splice(index, 1)
 }
 
 async function handleSave() {
+  // Validate: sub-team entries must have a name
+  saveValidationFailed.value = false
+  saveValidationError.value = ''
+
+  // Check boards that have sub-teams (multiple entries or any filter)
+  const byBoard = new Map()
+  for (const t of teams.value) {
+    const list = byBoard.get(t.boardId) || []
+    list.push(t)
+    byBoard.set(t.boardId, list)
+  }
+  for (const entries of byBoard.values()) {
+    const isSubTeam = entries.length > 1 || entries.some(e => e.sprintFilter?.trim())
+    if (isSubTeam && entries.some(e => !e.displayName?.trim())) {
+      saveValidationFailed.value = true
+      saveValidationError.value = 'All sub-team entries require a name.'
+      return
+    }
+  }
+
   isSaving.value = true
   try {
-    await saveTeams(teams.value)
+    const teamsWithIds = teams.value.map(t => ({
+      ...t,
+      teamId: generateTeamId(t.boardId, t.sprintFilter)
+    }))
+    await saveTeams(teamsWithIds)
     emit('saved')
   } catch (error) {
     console.error('Failed to save teams:', error)

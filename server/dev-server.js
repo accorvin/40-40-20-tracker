@@ -167,7 +167,13 @@ app.post('/api/refresh', function(req, res) {
       for (const team of enabledTeams) {
         try {
           const result = await processBoard({
-            board: { id: team.boardId, name: team.boardName || team.displayName },
+            board: {
+              id: team.boardId,
+              name: team.boardName || team.displayName,
+              teamId: team.teamId || String(team.boardId),
+              sprintFilter: team.sprintFilter || '',
+              calculationMode: team.calculationMode || 'points'
+            },
             hardRefresh,
             fetchSprints: deps.fetchSprints,
             fetchSprintIssues: deps.fetchSprintIssues,
@@ -185,7 +191,7 @@ app.post('/api/refresh', function(req, res) {
       const dashboardSummary = { lastUpdated: new Date().toISOString(), boards: {} };
       for (const { board, dashboardSprint, dashboardSprintResult } of boardResults) {
         if (dashboardSprint && dashboardSprintResult) {
-          dashboardSummary.boards[board.id] = {
+          dashboardSummary.boards[board.teamId || board.id] = {
             sprint: {
               id: dashboardSprint.id,
               name: dashboardSprint.name,
@@ -266,20 +272,22 @@ app.get('/api/boards', function(req, res) {
       return res.json({ boards: [], lastUpdated: null });
     }
 
-    // Merge with team config
+    // Build board-like entries from teams config (one entry per team, supporting sub-teams)
     const teamsData = readWithFallback(project, 'teams.json');
     if (teamsData && teamsData.teams) {
-      const teamMap = new Map(teamsData.teams.map(t => [t.boardId, t]));
-      data.boards = data.boards
-        .map(board => {
-          const teamConfig = teamMap.get(board.id);
+      const boardMap = new Map(data.boards.map(b => [b.id, b]));
+      data.boards = teamsData.teams
+        .filter(t => t.enabled !== false)
+        .map(t => {
+          const board = boardMap.get(t.boardId) || {};
           return {
             ...board,
-            displayName: teamConfig?.displayName || board.name,
-            enabled: teamConfig?.enabled !== false
+            id: t.teamId || String(t.boardId),
+            boardId: t.boardId,
+            name: t.boardName || board.name,
+            displayName: t.displayName || t.boardName || board.name
           };
-        })
-        .filter(board => board.enabled);
+        });
     }
 
     res.json(data);
@@ -293,7 +301,11 @@ app.get('/api/boards/:boardId/sprints', function(req, res) {
   try {
     const { boardId } = req.params;
     const project = req.query.project || null;
-    const data = readWithFallback(project, `sprints/board-${boardId}.json`);
+    // Try team-based key first, fall back to old board-based key for backward compat
+    let data = readWithFallback(project, `sprints/team-${boardId}.json`);
+    if (!data) {
+      data = readWithFallback(project, `sprints/board-${boardId}.json`);
+    }
 
     if (!data) {
       return res.json({ sprints: [] });
@@ -389,27 +401,28 @@ app.get('/api/dashboard-summary', function(req, res) {
     }
 
     // Build dashboard summary on-the-fly from existing sprint data
+    const teamsData = readWithFallback(project, 'teams.json');
     const boardsData = readWithFallback(project, 'boards.json');
-    if (!boardsData || !boardsData.boards) {
+    if (!teamsData?.teams && (!boardsData || !boardsData.boards)) {
       return res.json({ lastUpdated: null, boards: {} });
     }
 
-    const teamsData = readWithFallback(project, 'teams.json');
-    const enabledBoardIds = new Set(
-      teamsData?.teams?.filter(t => t.enabled !== false).map(t => t.boardId) || boardsData.boards.map(b => b.id)
-    );
+    const summary = { lastUpdated: boardsData?.lastUpdated || new Date().toISOString(), boards: {} };
 
-    const summary = { lastUpdated: boardsData.lastUpdated, boards: {} };
-
-    for (const board of boardsData.boards) {
-      if (!enabledBoardIds.has(board.id)) continue;
-
-      const boardSprints = readWithFallback(project, `sprints/board-${board.id}.json`);
-      if (!boardSprints?.sprints?.length) continue;
+    // Iterate teams (supports sub-teams with different filters)
+    const enabledTeams = teamsData?.teams?.filter(t => t.enabled !== false) || [];
+    for (const team of enabledTeams) {
+      const teamId = team.teamId || String(team.boardId);
+      // Try team-based key first, fall back to old board-based key
+      let teamSprints = readWithFallback(project, `sprints/team-${teamId}.json`);
+      if (!teamSprints) {
+        teamSprints = readWithFallback(project, `sprints/board-${team.boardId}.json`);
+      }
+      if (!teamSprints?.sprints?.length) continue;
 
       // Pick active sprint, or most recent closed
-      const activeSprint = boardSprints.sprints.find(s => s.state === 'active');
-      const dashSprint = activeSprint || [...boardSprints.sprints]
+      const activeSprint = teamSprints.sprints.find(s => s.state === 'active');
+      const dashSprint = activeSprint || [...teamSprints.sprints]
         .filter(s => s.state === 'closed')
         .sort((a, b) => new Date(b.startDate) - new Date(a.startDate))[0];
 
@@ -418,7 +431,7 @@ app.get('/api/dashboard-summary', function(req, res) {
       const sprintData = readWithFallback(project, `sprints/${dashSprint.id}.json`);
       if (!sprintData?.summary) continue;
 
-      summary.boards[board.id] = {
+      summary.boards[teamId] = {
         sprint: {
           id: dashSprint.id,
           name: dashSprint.name,
@@ -428,6 +441,38 @@ app.get('/api/dashboard-summary', function(req, res) {
         },
         summary: sprintData.summary
       };
+    }
+
+    // Fallback: if no teams config, iterate boards directly (backward compat)
+    if (!teamsData?.teams && boardsData?.boards) {
+      for (const board of boardsData.boards) {
+        let boardSprints = readWithFallback(project, `sprints/team-${board.id}.json`);
+        if (!boardSprints) {
+          boardSprints = readWithFallback(project, `sprints/board-${board.id}.json`);
+        }
+        if (!boardSprints?.sprints?.length) continue;
+
+        const activeSprint = boardSprints.sprints.find(s => s.state === 'active');
+        const dashSprint = activeSprint || [...boardSprints.sprints]
+          .filter(s => s.state === 'closed')
+          .sort((a, b) => new Date(b.startDate) - new Date(a.startDate))[0];
+
+        if (!dashSprint) continue;
+
+        const sprintData = readWithFallback(project, `sprints/${dashSprint.id}.json`);
+        if (!sprintData?.summary) continue;
+
+        summary.boards[board.id] = {
+          sprint: {
+            id: dashSprint.id,
+            name: dashSprint.name,
+            state: dashSprint.state,
+            startDate: dashSprint.startDate,
+            endDate: dashSprint.endDate
+          },
+          summary: sprintData.summary
+        };
+      }
     }
 
     res.json(summary);

@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect, vi } from 'vitest';
-import { discoverBoards, performRefresh, processBoard, performMultiProjectRefresh } from '../orchestration.js';
+import { discoverBoards, performRefresh, processBoard, performMultiProjectRefresh, generateTeamId } from '../orchestration.js';
 
 function makeDeps(overrides = {}) {
   return {
@@ -13,6 +13,36 @@ function makeDeps(overrides = {}) {
     ...overrides
   };
 }
+
+describe('generateTeamId', () => {
+  it('returns stringified boardId when no filter is provided', () => {
+    expect(generateTeamId(42)).toBe('42');
+  });
+
+  it('returns stringified boardId when filter is empty string', () => {
+    expect(generateTeamId(42, '')).toBe('42');
+  });
+
+  it('returns stringified boardId when filter is whitespace only', () => {
+    expect(generateTeamId(42, '   ')).toBe('42');
+  });
+
+  it('returns boardId_normalizedFilter when filter is provided', () => {
+    expect(generateTeamId(42, 'Team Alpha')).toBe('42_team-alpha');
+  });
+
+  it('trims and lowercases the filter', () => {
+    expect(generateTeamId(42, '  TEAM ALPHA  ')).toBe('42_team-alpha');
+  });
+
+  it('collapses multiple spaces into single hyphens', () => {
+    expect(generateTeamId(42, 'Team   Alpha  Beta')).toBe('42_team-alpha-beta');
+  });
+
+  it('handles undefined filter', () => {
+    expect(generateTeamId(42, undefined)).toBe('42');
+  });
+});
 
 describe('discoverBoards', () => {
   it('saves boards.json and teams.json', async () => {
@@ -112,6 +142,57 @@ describe('discoverBoards', () => {
     // Should stay enabled because manuallyConfigured is true
     expect(teamsCall[1].teams[0].enabled).toBe(true);
     expect(teamsCall[1].teams[0].stale).toBe(true);
+  });
+
+  it('preserves multiple sub-team entries for the same board', async () => {
+    const deps = makeDeps({
+      fetchBoards: vi.fn().mockResolvedValue([
+        { id: 1, name: 'RHOAIENG - Shared Board' }
+      ]),
+      fetchSprints: vi.fn().mockResolvedValue([
+        { state: 'active', completeDate: null, endDate: '2025-06-15' }
+      ]),
+      readStorage: vi.fn().mockReturnValue({
+        teams: [
+          { boardId: 1, boardName: 'RHOAIENG - Shared Board', displayName: 'Alpha', enabled: true, teamId: '1_alpha', sprintFilter: 'Alpha', manuallyConfigured: true },
+          { boardId: 1, boardName: 'RHOAIENG - Shared Board', displayName: 'Beta', enabled: true, teamId: '1_beta', sprintFilter: 'Beta', manuallyConfigured: true }
+        ]
+      })
+    });
+
+    await discoverBoards(deps);
+
+    const teamsCall = deps.writeStorage.mock.calls.find(c => c[0] === 'teams.json');
+    const teams = teamsCall[1].teams;
+    // Both sub-team entries should be preserved
+    expect(teams.filter(t => t.boardId === 1)).toHaveLength(2);
+    expect(teams.find(t => t.teamId === '1_alpha')).toBeDefined();
+    expect(teams.find(t => t.teamId === '1_beta')).toBeDefined();
+  });
+
+  it('updates staleness on all sub-team entries for the same board', async () => {
+    const deps = makeDeps({
+      fetchBoards: vi.fn().mockResolvedValue([
+        { id: 1, name: 'RHOAIENG - Shared Board' }
+      ]),
+      fetchSprints: vi.fn().mockResolvedValue([
+        { state: 'active', completeDate: null, endDate: '2025-06-15' }
+      ]),
+      readStorage: vi.fn().mockReturnValue({
+        teams: [
+          { boardId: 1, boardName: 'RHOAIENG - Shared Board', displayName: 'Alpha', teamId: '1_alpha', sprintFilter: 'Alpha', enabled: true, stale: true, manuallyConfigured: true },
+          { boardId: 1, boardName: 'RHOAIENG - Shared Board', displayName: 'Beta', teamId: '1_beta', sprintFilter: 'Beta', enabled: true, stale: true, manuallyConfigured: true }
+        ]
+      })
+    });
+
+    await discoverBoards(deps);
+
+    const teamsCall = deps.writeStorage.mock.calls.find(c => c[0] === 'teams.json');
+    const teams = teamsCall[1].teams;
+    // Both entries should have updated staleness (not stale since active sprint exists)
+    expect(teams.find(t => t.teamId === '1_alpha').stale).toBe(false);
+    expect(teams.find(t => t.teamId === '1_beta').stale).toBe(false);
   });
 
   it('handles sprint fetch errors gracefully', async () => {
@@ -239,6 +320,70 @@ describe('performRefresh', () => {
     expect(deps.fetchSprintIssues).toHaveBeenCalledWith(100);
   });
 
+  it('passes teamId and sprintFilter from teams.json to processBoard', async () => {
+    const deps = makeDeps({
+      fetchBoards: vi.fn().mockResolvedValue([
+        { id: 1, name: 'Board A' }
+      ]),
+      fetchSprints: vi.fn().mockResolvedValue([
+        { id: 100, name: 'Alpha Sprint 1', state: 'active', startDate: '2025-06-01', endDate: '2025-06-14', completeDate: null }
+      ]),
+      fetchSprintIssues: vi.fn().mockResolvedValue([]),
+      readStorage: vi.fn().mockImplementation((key) => {
+        if (key === 'teams.json') {
+          return {
+            teams: [{
+              boardId: 1,
+              boardName: 'Board A',
+              enabled: true,
+              teamId: '1_alpha',
+              sprintFilter: 'Alpha',
+              calculationMode: 'counts'
+            }]
+          };
+        }
+        return null;
+      })
+    });
+
+    const result = await performRefresh({ ...deps, hardRefresh: false });
+
+    // Sprint index should use teamId key
+    const indexCall = deps.writeStorage.mock.calls.find(c => c[0] === 'sprints/team-1_alpha.json');
+    expect(indexCall).toBeDefined();
+
+    // Dashboard summary should use teamId as key
+    const dashCall = deps.writeStorage.mock.calls.find(c => c[0] === 'dashboard-summary.json');
+    expect(dashCall).toBeDefined();
+    expect(dashCall[1].boards['1_alpha']).toBeDefined();
+  });
+
+  it('defaults teamId to String(boardId) when not set in teams.json', async () => {
+    const deps = makeDeps({
+      fetchBoards: vi.fn().mockResolvedValue([
+        { id: 1, name: 'Board A' }
+      ]),
+      fetchSprints: vi.fn().mockResolvedValue([
+        { id: 100, name: 'Sprint 1', state: 'active', startDate: '2025-06-01', endDate: '2025-06-14', completeDate: null }
+      ]),
+      fetchSprintIssues: vi.fn().mockResolvedValue([]),
+      readStorage: vi.fn().mockImplementation((key) => {
+        if (key === 'teams.json') {
+          return {
+            teams: [{ boardId: 1, boardName: 'Board A', enabled: true }]
+          };
+        }
+        return null;
+      })
+    });
+
+    const result = await performRefresh({ ...deps, hardRefresh: false });
+
+    // Dashboard summary should use string boardId as key
+    const dashCall = deps.writeStorage.mock.calls.find(c => c[0] === 'dashboard-summary.json');
+    expect(dashCall[1].boards['1']).toBeDefined();
+  });
+
   it('auto-generates teams.json if missing', async () => {
     const deps = makeDeps({
       fetchBoards: vi.fn().mockResolvedValue([
@@ -268,7 +413,7 @@ describe('performRefresh', () => {
 
     await performRefresh({ ...deps, hardRefresh: false });
 
-    const indexCall = deps.writeStorage.mock.calls.find(c => c[0] === 'sprints/board-1.json');
+    const indexCall = deps.writeStorage.mock.calls.find(c => c[0] === 'sprints/team-1.json');
     expect(indexCall).toBeDefined();
     expect(indexCall[1].sprints).toHaveLength(1);
     expect(indexCall[1].sprints[0].id).toBe(100);
@@ -395,6 +540,121 @@ describe('processBoard', () => {
 
     const sprintCall = writeStorage.mock.calls.find(c => c[0] === 'sprints/100.json');
     expect(sprintCall[1].issues).toHaveLength(6);
+  });
+
+  it('filters sprints by name when board.sprintFilter is set', async () => {
+    const readStorage = vi.fn().mockReturnValue(null);
+    const writeStorage = vi.fn();
+    const fetchSprints = vi.fn().mockResolvedValue([
+      { id: 100, name: 'Team Alpha Sprint 1', state: 'active', startDate: '2025-06-01', endDate: '2025-06-14', completeDate: null },
+      { id: 101, name: 'Team Beta Sprint 1', state: 'active', startDate: '2025-06-01', endDate: '2025-06-14', completeDate: null },
+      { id: 102, name: 'Team Alpha Sprint 2', state: 'closed', startDate: '2025-05-01', endDate: '2025-05-14', completeDate: '2025-05-15' }
+    ]);
+    const fetchSprintIssues = vi.fn().mockResolvedValue([]);
+
+    const result = await processBoard({
+      board: { id: 1, name: 'Board A', sprintFilter: 'Team Alpha' },
+      hardRefresh: false,
+      fetchSprints,
+      fetchSprintIssues,
+      readStorage,
+      writeStorage
+    });
+
+    // Should only process Team Alpha sprints (100, 102), not Team Beta (101)
+    expect(result.sprintResults).toHaveLength(2);
+    expect(result.sprintResults.map(r => r.sprintName)).toEqual(
+      expect.arrayContaining(['Team Alpha Sprint 1', 'Team Alpha Sprint 2'])
+    );
+    expect(result.sprintResults.map(r => r.sprintName)).not.toContain('Team Beta Sprint 1');
+  });
+
+  it('sprint filter is case-insensitive', async () => {
+    const readStorage = vi.fn().mockReturnValue(null);
+    const writeStorage = vi.fn();
+    const fetchSprints = vi.fn().mockResolvedValue([
+      { id: 100, name: 'TEAM ALPHA Sprint 1', state: 'active', startDate: '2025-06-01', endDate: '2025-06-14', completeDate: null },
+      { id: 101, name: 'team beta Sprint 1', state: 'active', startDate: '2025-06-01', endDate: '2025-06-14', completeDate: null }
+    ]);
+    const fetchSprintIssues = vi.fn().mockResolvedValue([]);
+
+    const result = await processBoard({
+      board: { id: 1, name: 'Board A', sprintFilter: 'team alpha' },
+      hardRefresh: false,
+      fetchSprints,
+      fetchSprintIssues,
+      readStorage,
+      writeStorage
+    });
+
+    expect(result.sprintResults).toHaveLength(1);
+    expect(result.sprintResults[0].sprintName).toBe('TEAM ALPHA Sprint 1');
+  });
+
+  it('writes sprint index using teamId when provided', async () => {
+    const readStorage = vi.fn().mockReturnValue(null);
+    const writeStorage = vi.fn();
+    const fetchSprints = vi.fn().mockResolvedValue([
+      { id: 100, name: 'Sprint 1', state: 'active', startDate: '2025-06-01', endDate: '2025-06-14', completeDate: null }
+    ]);
+    const fetchSprintIssues = vi.fn().mockResolvedValue([]);
+
+    await processBoard({
+      board: { id: 1, name: 'Board A', teamId: '1_team-alpha', sprintFilter: 'Team Alpha' },
+      hardRefresh: false,
+      fetchSprints,
+      fetchSprintIssues,
+      readStorage,
+      writeStorage
+    });
+
+    const indexCall = writeStorage.mock.calls.find(c => c[0] === 'sprints/team-1_team-alpha.json');
+    expect(indexCall).toBeDefined();
+    // Should NOT write old-style key
+    const oldCall = writeStorage.mock.calls.find(c => c[0] === 'sprints/board-1.json');
+    expect(oldCall).toBeUndefined();
+  });
+
+  it('falls back to board.id for sprint index when no teamId', async () => {
+    const readStorage = vi.fn().mockReturnValue(null);
+    const writeStorage = vi.fn();
+    const fetchSprints = vi.fn().mockResolvedValue([
+      { id: 100, name: 'Sprint 1', state: 'active', startDate: '2025-06-01', endDate: '2025-06-14', completeDate: null }
+    ]);
+    const fetchSprintIssues = vi.fn().mockResolvedValue([]);
+
+    await processBoard({
+      board: { id: 1, name: 'Board A' },
+      hardRefresh: false,
+      fetchSprints,
+      fetchSprintIssues,
+      readStorage,
+      writeStorage
+    });
+
+    const indexCall = writeStorage.mock.calls.find(c => c[0] === 'sprints/team-1.json');
+    expect(indexCall).toBeDefined();
+  });
+
+  it('does not filter sprints when sprintFilter is empty', async () => {
+    const readStorage = vi.fn().mockReturnValue(null);
+    const writeStorage = vi.fn();
+    const fetchSprints = vi.fn().mockResolvedValue([
+      { id: 100, name: 'Sprint 1', state: 'active', startDate: '2025-06-01', endDate: '2025-06-14', completeDate: null },
+      { id: 101, name: 'Sprint 2', state: 'active', startDate: '2025-06-01', endDate: '2025-06-14', completeDate: null }
+    ]);
+    const fetchSprintIssues = vi.fn().mockResolvedValue([]);
+
+    const result = await processBoard({
+      board: { id: 1, name: 'Board A', sprintFilter: '' },
+      hardRefresh: false,
+      fetchSprints,
+      fetchSprintIssues,
+      readStorage,
+      writeStorage
+    });
+
+    expect(result.sprintResults).toHaveLength(2);
   });
 
   it('uses cached closed sprint data when not hard refresh', async () => {

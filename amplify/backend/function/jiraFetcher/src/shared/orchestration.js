@@ -15,6 +15,19 @@ const { getStoragePrefix, createPrefixedStorage } = require('./config');
 const ALLOWED_ISSUE_TYPES = ['Bug', 'Task', 'Story', 'Spike', 'Vulnerability', 'Weakness'];
 
 /**
+ * Generate a unique team identifier from a board ID and optional sprint filter.
+ *
+ * @param {number|string} boardId
+ * @param {string} [sprintFilter]
+ * @returns {string}
+ */
+function generateTeamId(boardId, sprintFilter) {
+  if (!sprintFilter?.trim()) return String(boardId);
+  const normalized = sprintFilter.trim().toLowerCase().replace(/\s+/g, '-');
+  return `${boardId}_${normalized}`;
+}
+
+/**
  * Discover boards from Jira, determine staleness, and merge with existing team config.
  *
  * @param {object} deps
@@ -58,40 +71,49 @@ async function discoverBoards({ projectKey, fetchBoards, fetchSprints, readStora
   console.log(`Staleness check: ${staleCount} of ${boards.length} boards are stale`);
 
   // Merge with existing teams config (preserve enabled/disabled state + manual overrides)
+  // Group existing entries by boardId to support sub-teams (multiple entries per board)
   const existingTeams = await readStorage('teams.json');
-  const existingMap = existingTeams?.teams
-    ? new Map(existingTeams.teams.map(t => [t.boardId, t]))
-    : new Map();
-
-  const mergedTeams = boards.map(b => {
-    const staleness = boardStaleness.get(b.id) || { stale: false, lastSprintEndDate: null };
-    const existing = existingMap.get(b.id);
-
-    if (existing) {
-      // Existing board: update staleness fields, auto-disable only if stale and not manually configured
-      const updated = {
-        ...existing,
-        boardName: b.name,
-        stale: staleness.stale,
-        lastSprintEndDate: staleness.lastSprintEndDate
-      };
-      if (staleness.stale && !existing.manuallyConfigured) {
-        updated.enabled = false;
-      }
-      return updated;
+  const existingByBoard = new Map(); // boardId → [team entries]
+  if (existingTeams?.teams) {
+    for (const t of existingTeams.teams) {
+      const list = existingByBoard.get(t.boardId) || [];
+      list.push(t);
+      existingByBoard.set(t.boardId, list);
     }
+  }
 
-    // New board: auto-set enabled based on staleness
-    return {
-      boardId: b.id,
-      boardName: b.name,
-      displayName: b.name.replace(/^RHOAIENG\s*[-–]\s*/, ''),
-      enabled: !staleness.stale,
-      stale: staleness.stale,
-      lastSprintEndDate: staleness.lastSprintEndDate,
-      manuallyConfigured: false
-    };
-  });
+  const mergedTeams = [];
+  for (const b of boards) {
+    const staleness = boardStaleness.get(b.id) || { stale: false, lastSprintEndDate: null };
+    const existingEntries = existingByBoard.get(b.id);
+
+    if (existingEntries && existingEntries.length > 0) {
+      // Existing board: update staleness on all entries (sub-teams)
+      for (const existing of existingEntries) {
+        const updated = {
+          ...existing,
+          boardName: b.name,
+          stale: staleness.stale,
+          lastSprintEndDate: staleness.lastSprintEndDate
+        };
+        if (staleness.stale && !existing.manuallyConfigured) {
+          updated.enabled = false;
+        }
+        mergedTeams.push(updated);
+      }
+    } else {
+      // New board: auto-set enabled based on staleness
+      mergedTeams.push({
+        boardId: b.id,
+        boardName: b.name,
+        displayName: b.name.replace(/^RHOAIENG\s*[-–]\s*/, ''),
+        enabled: !staleness.stale,
+        stale: staleness.stale,
+        lastSprintEndDate: staleness.lastSprintEndDate,
+        manuallyConfigured: false
+      });
+    }
+  }
 
   await writeStorage('teams.json', { teams: mergedTeams });
 
@@ -117,8 +139,16 @@ async function processBoard({ board, hardRefresh, fetchSprints, fetchSprintIssue
   const calculationMode = board.calculationMode || 'points';
   console.log(`Processing board: ${board.name} (${board.id})`);
 
-  const sprints = await fetchSprints(board.id);
+  let sprints = await fetchSprints(board.id);
   console.log(`  [${board.name}] Found ${sprints.length} sprints`);
+
+  // Filter sprints by name if sprintFilter is set
+  if (board.sprintFilter?.trim()) {
+    const filterLower = board.sprintFilter.trim().toLowerCase();
+    const beforeCount = sprints.length;
+    sprints = sprints.filter(s => s.name.toLowerCase().includes(filterLower));
+    console.log(`  [${board.name}] Sprint filter "${board.sprintFilter}": ${sprints.length} of ${beforeCount} sprints match`);
+  }
 
   const activeSprints = sprints.filter(s => s.state === 'active');
   const futureSprints = sprints.filter(s => s.state === 'future');
@@ -194,8 +224,9 @@ async function processBoard({ board, hardRefresh, fetchSprints, fetchSprintIssue
     });
   }
 
-  // Upload sprints index for this board
-  await writeStorage(`sprints/board-${board.id}.json`, {
+  // Upload sprints index for this team
+  const teamKey = board.teamId || String(board.id);
+  await writeStorage(`sprints/team-${teamKey}.json`, {
     boardId: board.id,
     boardName: board.name,
     lastUpdated: new Date().toISOString(),
@@ -245,26 +276,21 @@ async function performRefresh({ projectKey, hardRefresh, fetchBoards, fetchSprin
   const allBoards = await fetchBoards(projectKey);
   console.log(`Found ${allBoards.length} scrum boards`);
 
-  // Filter to enabled boards only and attach calculationMode
+  // Build board list from teams config (supports sub-teams with different filters)
   const teamsData = await readStorage('teams.json');
   let boards = allBoards;
   if (teamsData && teamsData.teams) {
-    const teamMap = new Map(teamsData.teams.map(t => [t.boardId, t]));
-    boards = allBoards
-      .filter(b => {
-        const team = teamMap.get(b.id);
-        return !team || team.enabled !== false;
-      })
-      .map(b => {
-        const team = teamMap.get(b.id);
-        return {
-          ...b,
-          calculationMode: team?.calculationMode || 'points'
-        };
-      });
-    const skipped = allBoards.length - boards.length;
+    const enabledTeams = teamsData.teams.filter(t => t.enabled !== false);
+    boards = enabledTeams.map(team => ({
+      id: team.boardId,
+      name: team.boardName,
+      teamId: team.teamId || String(team.boardId),
+      sprintFilter: team.sprintFilter || '',
+      calculationMode: team.calculationMode || 'points'
+    }));
+    const skipped = teamsData.teams.length - enabledTeams.length;
     if (skipped > 0) {
-      console.log(`Skipping ${skipped} disabled boards`);
+      console.log(`Skipping ${skipped} disabled teams`);
     }
   }
 
@@ -307,7 +333,7 @@ async function performRefresh({ projectKey, hardRefresh, fetchBoards, fetchSprin
 
   for (const { board, dashboardSprint, dashboardSprintResult } of boardResults) {
     if (dashboardSprint && dashboardSprintResult) {
-      dashboardSummary.boards[board.id] = {
+      dashboardSummary.boards[board.teamId || board.id] = {
         sprint: {
           id: dashboardSprint.id,
           name: dashboardSprint.name,
@@ -406,4 +432,4 @@ async function performMultiProjectRefresh({ projects, hardRefresh, fetchBoards, 
   };
 }
 
-module.exports = { discoverBoards, performRefresh, processBoard, performMultiProjectRefresh };
+module.exports = { discoverBoards, performRefresh, processBoard, performMultiProjectRefresh, generateTeamId };

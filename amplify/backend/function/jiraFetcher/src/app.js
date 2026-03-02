@@ -247,11 +247,17 @@ async function performMultiProjectRefresh({ projects, hardRefresh }) {
  * Called from index.js when the event source is SQS.
  */
 async function processSqsMessage(message) {
-  const { projectKey, boardId, boardName, hardRefresh } = message;
+  const { projectKey, boardId, boardName, teamId, sprintFilter, calculationMode, hardRefresh } = message;
   const deps = getDepsForProject(projectKey);
 
   const result = await sharedProcessBoard({
-    board: { id: boardId, name: boardName },
+    board: {
+      id: boardId,
+      name: boardName,
+      teamId: teamId || String(boardId),
+      sprintFilter: sprintFilter || '',
+      calculationMode: calculationMode || 'points'
+    },
     hardRefresh: hardRefresh || false,
     fetchSprints: deps.fetchSprints,
     fetchSprintIssues: deps.fetchSprintIssues,
@@ -285,6 +291,9 @@ async function enqueueBoardRefreshes({ projectKey, hardRefresh }) {
         projectKey,
         boardId: team.boardId,
         boardName: team.boardName || team.displayName,
+        teamId: team.teamId || String(team.boardId),
+        sprintFilter: team.sprintFilter || '',
+        calculationMode: team.calculationMode || 'points',
         hardRefresh: hardRefresh || false
       })
     });
