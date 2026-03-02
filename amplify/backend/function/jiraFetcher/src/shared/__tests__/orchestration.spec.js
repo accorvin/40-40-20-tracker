@@ -946,7 +946,8 @@ describe('discoverBoards with kanban', () => {
     const teamsCall = deps.writeStorage.mock.calls.find(c => c[0] === 'teams.json');
     const kanbanTeam = teamsCall[1].teams.find(t => t.boardType === 'kanban');
     expect(kanbanTeam.stale).toBe(false);
-    expect(kanbanTeam.enabled).toBe(true);
+    // New kanban boards default to disabled until explicitly enabled
+    expect(kanbanTeam.enabled).toBe(false);
   });
 
   it('preserves existing kanban team config', async () => {

@@ -123,11 +123,13 @@ async function discoverBoards({ projectKey, fetchBoards, fetchSprints, readStora
       }
     } else {
       // New board: auto-set enabled based on staleness
+      // Kanban boards default to disabled until explicitly enabled by user
+      const isKanban = (b.boardType || 'scrum') === 'kanban';
       mergedTeams.push({
         boardId: b.id,
         boardName: b.name,
         displayName: b.name.replace(/^RHOAIENG\s*[-–]\s*/, ''),
-        enabled: !staleness.stale,
+        enabled: isKanban ? false : !staleness.stale,
         stale: staleness.stale,
         lastSprintEndDate: staleness.lastSprintEndDate,
         boardType: b.boardType || 'scrum',
