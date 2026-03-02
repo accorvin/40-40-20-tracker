@@ -248,6 +248,13 @@
                   <span class="font-medium text-gray-900">{{ group.displayName || group.boardName }}</span>
                   <span class="ml-2 text-sm text-gray-500">ID: {{ group.boardId }}</span>
                   <span
+                    v-if="group.boardType === 'kanban'"
+                    data-testid="kanban-badge"
+                    class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700"
+                  >
+                    Kanban
+                  </span>
+                  <span
                     v-if="group.stale"
                     class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600"
                   >
@@ -315,7 +322,7 @@
                       ]"
                     />
                   </div>
-                  <div class="flex items-center gap-2">
+                  <div v-if="group.boardType !== 'kanban'" class="flex items-center gap-2">
                     <span class="text-xs text-gray-500">Filter:</span>
                     <input
                       :value="entry.sprintFilter"
@@ -431,6 +438,7 @@ const groupedBoards = computed(() => {
         displayName: t.displayName || t.boardName,
         stale: t.stale,
         lastSprintEndDate: t.lastSprintEndDate,
+        boardType: t.boardType || 'scrum',
         entries: []
       })
     }

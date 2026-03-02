@@ -17,7 +17,7 @@ const { SSMClient, GetParameterCommand } = require('@aws-sdk/client-ssm');
 const fetch = require('node-fetch');
 const { verifyFirebaseToken } = require('./verifyToken');
 const { createJiraClient } = require('./shared/jira-client');
-const { discoverBoards, performRefresh: sharedPerformRefresh, performMultiProjectRefresh: sharedMultiProjectRefresh, processBoard: sharedProcessBoard } = require('./shared/orchestration');
+const { discoverBoards, performRefresh: sharedPerformRefresh, performMultiProjectRefresh: sharedMultiProjectRefresh, processBoard: sharedProcessBoard, processKanbanBoard: sharedProcessKanbanBoard } = require('./shared/orchestration');
 const { getStoragePrefix, createPrefixedStorage } = require('./shared/config');
 
 const app = express();
@@ -247,23 +247,38 @@ async function performMultiProjectRefresh({ projects, hardRefresh }) {
  * Called from index.js when the event source is SQS.
  */
 async function processSqsMessage(message) {
-  const { projectKey, boardId, boardName, teamId, sprintFilter, calculationMode, hardRefresh } = message;
+  const { projectKey, boardId, boardName, teamId, sprintFilter, calculationMode, hardRefresh, boardType } = message;
   const deps = getDepsForProject(projectKey);
 
-  const result = await sharedProcessBoard({
-    board: {
-      id: boardId,
-      name: boardName,
-      teamId: teamId || String(boardId),
-      sprintFilter: sprintFilter || '',
-      calculationMode: calculationMode || 'points'
-    },
-    hardRefresh: hardRefresh || false,
-    fetchSprints: deps.fetchSprints,
-    fetchSprintIssues: deps.fetchSprintIssues,
-    readStorage: deps.readStorage,
-    writeStorage: deps.writeStorage
-  });
+  const board = {
+    id: boardId,
+    name: boardName,
+    teamId: teamId || String(boardId),
+    sprintFilter: sprintFilter || '',
+    calculationMode: calculationMode || 'points',
+    boardType: boardType || 'scrum'
+  };
+
+  let result;
+  if (board.boardType === 'kanban') {
+    result = await sharedProcessKanbanBoard({
+      board,
+      fetchBoardConfiguration: deps.fetchBoardConfiguration,
+      fetchFilterJql: deps.fetchFilterJql,
+      fetchIssuesByJql: deps.fetchIssuesByJql,
+      readStorage: deps.readStorage,
+      writeStorage: deps.writeStorage
+    });
+  } else {
+    result = await sharedProcessBoard({
+      board,
+      hardRefresh: hardRefresh || false,
+      fetchSprints: deps.fetchSprints,
+      fetchSprintIssues: deps.fetchSprintIssues,
+      readStorage: deps.readStorage,
+      writeStorage: deps.writeStorage
+    });
+  }
 
   console.log(`Processed board ${boardName} (${boardId}): ${result.sprintResults.length} sprints`);
   return { success: true, boardId, sprintCount: result.sprintResults.length };
@@ -294,6 +309,7 @@ async function enqueueBoardRefreshes({ projectKey, hardRefresh }) {
         teamId: team.teamId || String(team.boardId),
         sprintFilter: team.sprintFilter || '',
         calculationMode: team.calculationMode || 'points',
+        boardType: team.boardType || 'scrum',
         hardRefresh: hardRefresh || false
       })
     });

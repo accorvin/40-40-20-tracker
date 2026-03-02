@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect, vi } from 'vitest';
-import { discoverBoards, performRefresh, processBoard, performMultiProjectRefresh, generateTeamId } from '../orchestration.js';
+import { discoverBoards, performRefresh, processBoard, processKanbanBoard, performMultiProjectRefresh, generateTeamId } from '../orchestration.js';
 
 function makeDeps(overrides = {}) {
   return {
@@ -8,6 +8,9 @@ function makeDeps(overrides = {}) {
     fetchBoards: vi.fn().mockResolvedValue([]),
     fetchSprints: vi.fn().mockResolvedValue([]),
     fetchSprintIssues: vi.fn().mockResolvedValue([]),
+    fetchBoardConfiguration: vi.fn().mockResolvedValue({ filterId: '555' }),
+    fetchFilterJql: vi.fn().mockResolvedValue('project = PROJ'),
+    fetchIssuesByJql: vi.fn().mockResolvedValue([]),
     readStorage: vi.fn().mockReturnValue(null),
     writeStorage: vi.fn(),
     ...overrides
@@ -44,10 +47,18 @@ describe('generateTeamId', () => {
   });
 });
 
+/** Helper: create a fetchBoards mock that returns boards only for the scrum call */
+function scrumOnlyFetchBoards(scrumBoards) {
+  return vi.fn().mockImplementation((projectKey, boardType) => {
+    if (boardType === 'kanban') return Promise.resolve([]);
+    return Promise.resolve(scrumBoards);
+  });
+}
+
 describe('discoverBoards', () => {
   it('saves boards.json and teams.json', async () => {
     const deps = makeDeps({
-      fetchBoards: vi.fn().mockResolvedValue([
+      fetchBoards: scrumOnlyFetchBoards([
         { id: 1, name: 'RHOAIENG - Team Alpha' }
       ]),
       fetchSprints: vi.fn().mockResolvedValue([
@@ -77,7 +88,7 @@ describe('discoverBoards', () => {
 
   it('marks stale boards as disabled', async () => {
     const deps = makeDeps({
-      fetchBoards: vi.fn().mockResolvedValue([
+      fetchBoards: scrumOnlyFetchBoards([
         { id: 1, name: 'RHOAIENG - Stale Team' }
       ]),
       fetchSprints: vi.fn().mockResolvedValue([
@@ -95,7 +106,7 @@ describe('discoverBoards', () => {
 
   it('preserves existing team config for known boards', async () => {
     const deps = makeDeps({
-      fetchBoards: vi.fn().mockResolvedValue([
+      fetchBoards: scrumOnlyFetchBoards([
         { id: 1, name: 'RHOAIENG - Team Alpha' }
       ]),
       fetchSprints: vi.fn().mockResolvedValue([
@@ -121,7 +132,7 @@ describe('discoverBoards', () => {
 
   it('does not auto-disable stale boards that are manually configured', async () => {
     const deps = makeDeps({
-      fetchBoards: vi.fn().mockResolvedValue([
+      fetchBoards: scrumOnlyFetchBoards([
         { id: 1, name: 'RHOAIENG - Team Alpha' }
       ]),
       fetchSprints: vi.fn().mockResolvedValue([]),
@@ -146,7 +157,7 @@ describe('discoverBoards', () => {
 
   it('preserves multiple sub-team entries for the same board', async () => {
     const deps = makeDeps({
-      fetchBoards: vi.fn().mockResolvedValue([
+      fetchBoards: scrumOnlyFetchBoards([
         { id: 1, name: 'RHOAIENG - Shared Board' }
       ]),
       fetchSprints: vi.fn().mockResolvedValue([
@@ -172,7 +183,7 @@ describe('discoverBoards', () => {
 
   it('updates staleness on all sub-team entries for the same board', async () => {
     const deps = makeDeps({
-      fetchBoards: vi.fn().mockResolvedValue([
+      fetchBoards: scrumOnlyFetchBoards([
         { id: 1, name: 'RHOAIENG - Shared Board' }
       ]),
       fetchSprints: vi.fn().mockResolvedValue([
@@ -197,7 +208,7 @@ describe('discoverBoards', () => {
 
   it('handles sprint fetch errors gracefully', async () => {
     const deps = makeDeps({
-      fetchBoards: vi.fn().mockResolvedValue([
+      fetchBoards: scrumOnlyFetchBoards([
         { id: 1, name: 'Board A' }
       ]),
       fetchSprints: vi.fn().mockRejectedValue(new Error('Network error'))
@@ -785,5 +796,275 @@ describe('performMultiProjectRefresh', () => {
     expect(result.projects).toHaveLength(2);
     expect(result.projects[0].success).toBe(false);
     expect(result.projects[1].success).toBe(true);
+  });
+});
+
+describe('processKanbanBoard', () => {
+  function makeKanbanDeps(overrides = {}) {
+    return {
+      board: { id: 10, name: 'Kanban Board', teamId: 'kanban-10' },
+      fetchBoardConfiguration: vi.fn().mockResolvedValue({ filterId: '555' }),
+      fetchFilterJql: vi.fn().mockResolvedValue('project = PROJ AND type in (Bug, Story)'),
+      fetchIssuesByJql: vi.fn().mockResolvedValue([]),
+      readStorage: vi.fn().mockReturnValue(null),
+      writeStorage: vi.fn(),
+      ...overrides
+    };
+  }
+
+  it('fetches board config, filter JQL, and issues', async () => {
+    const deps = makeKanbanDeps({
+      fetchIssuesByJql: vi.fn().mockResolvedValue([
+        { key: 'P-1', summary: 'Bug', issueType: 'Bug', activityType: 'Tech Debt & Quality', storyPoints: 3, resolution: 'Done', resolutionDate: '2025-01-10' }
+      ])
+    });
+
+    const result = await processKanbanBoard(deps);
+
+    expect(deps.fetchBoardConfiguration).toHaveBeenCalledWith(10);
+    expect(deps.fetchFilterJql).toHaveBeenCalledWith('555');
+    expect(deps.fetchIssuesByJql).toHaveBeenCalledWith(
+      expect.stringContaining('project = PROJ AND type in (Bug, Story)')
+    );
+    expect(deps.fetchIssuesByJql).toHaveBeenCalledWith(
+      expect.stringContaining('resolved >= -2w')
+    );
+  });
+
+  it('creates a synthetic sprint with "Last 2 weeks" name', async () => {
+    const deps = makeKanbanDeps();
+    const result = await processKanbanBoard(deps);
+
+    expect(result.dashboardSprint.name).toBe('Last 2 weeks');
+    expect(result.dashboardSprint.state).toBe('active');
+    expect(result.dashboardSprint.id).toBe('kanban-10');
+  });
+
+  it('writes sprint data and team index to storage', async () => {
+    const deps = makeKanbanDeps({
+      fetchIssuesByJql: vi.fn().mockResolvedValue([
+        { key: 'P-1', summary: 'Bug', issueType: 'Bug', activityType: 'Tech Debt & Quality', storyPoints: 3, resolution: 'Done', resolutionDate: '2025-01-10' }
+      ])
+    });
+
+    await processKanbanBoard(deps);
+
+    const sprintCall = deps.writeStorage.mock.calls.find(c => c[0] === 'sprints/kanban-10.json');
+    expect(sprintCall).toBeDefined();
+    expect(sprintCall[1].issues).toHaveLength(1);
+    expect(sprintCall[1].issues[0].bucket).toBe('tech-debt-quality');
+
+    const indexCall = deps.writeStorage.mock.calls.find(c => c[0] === 'sprints/team-kanban-10.json');
+    expect(indexCall).toBeDefined();
+    expect(indexCall[1].sprints).toHaveLength(1);
+    expect(indexCall[1].sprints[0].name).toBe('Last 2 weeks');
+  });
+
+  it('filters out disallowed issue types', async () => {
+    const deps = makeKanbanDeps({
+      fetchIssuesByJql: vi.fn().mockResolvedValue([
+        { key: 'P-1', summary: 'Bug', issueType: 'Bug', activityType: 'Tech Debt & Quality', storyPoints: 3, resolution: 'Done', resolutionDate: '2025-01-10' },
+        { key: 'P-2', summary: 'Epic', issueType: 'Epic', activityType: 'New Features', storyPoints: 50, resolution: null, resolutionDate: null },
+        { key: 'P-3', summary: 'Subtask', issueType: 'Sub-task', activityType: null, storyPoints: 1, resolution: null, resolutionDate: null }
+      ])
+    });
+
+    const result = await processKanbanBoard(deps);
+
+    expect(result.dashboardSprintResult.issueCount).toBe(1);
+    expect(result.dashboardSprintResult.summary.totalPoints).toBe(3);
+  });
+
+  it('returns same shape as processBoard', async () => {
+    const deps = makeKanbanDeps();
+    const result = await processKanbanBoard(deps);
+
+    expect(result).toHaveProperty('board');
+    expect(result).toHaveProperty('sprintResults');
+    expect(result).toHaveProperty('dashboardSprint');
+    expect(result).toHaveProperty('dashboardSprintResult');
+    expect(result.board.id).toBe(10);
+  });
+
+  it('uses board.calculationMode', async () => {
+    const deps = makeKanbanDeps({
+      board: { id: 10, name: 'Kanban Board', teamId: 'kanban-10', calculationMode: 'counts' },
+      fetchIssuesByJql: vi.fn().mockResolvedValue([
+        { key: 'P-1', summary: 'Bug', issueType: 'Bug', activityType: 'Tech Debt & Quality', storyPoints: 3, resolution: 'Done', resolutionDate: '2025-01-10' },
+        { key: 'P-2', summary: 'Story', issueType: 'Story', activityType: 'New Features', storyPoints: 5, resolution: 'Done', resolutionDate: '2025-01-11' }
+      ])
+    });
+
+    const result = await processKanbanBoard(deps);
+
+    // totalPoints always holds sum of story points; calculationMode affects percentages only
+    expect(result.dashboardSprintResult.summary.totalPoints).toBe(8);
+    expect(result.dashboardSprintResult.summary.calculationMode).toBe('counts');
+  });
+});
+
+describe('discoverBoards with kanban', () => {
+  it('discovers both scrum and kanban boards', async () => {
+    const deps = makeDeps({
+      fetchBoards: vi.fn().mockImplementation((projectKey, boardType) => {
+        if (boardType === 'kanban') {
+          return Promise.resolve([{ id: 20, name: 'Kanban Board', type: 'kanban' }]);
+        }
+        return Promise.resolve([{ id: 1, name: 'Scrum Board', type: 'scrum' }]);
+      }),
+      fetchSprints: vi.fn().mockResolvedValue([
+        { state: 'active', completeDate: null, endDate: '2025-06-15' }
+      ])
+    });
+
+    const result = await discoverBoards(deps);
+
+    expect(result.boardCount).toBe(2);
+    const teamsCall = deps.writeStorage.mock.calls.find(c => c[0] === 'teams.json');
+    const teams = teamsCall[1].teams;
+    expect(teams).toHaveLength(2);
+    expect(teams.find(t => t.boardType === 'kanban')).toBeDefined();
+    expect(teams.find(t => t.boardType === 'scrum')).toBeDefined();
+  });
+
+  it('skips staleness check for kanban boards', async () => {
+    const deps = makeDeps({
+      fetchBoards: vi.fn().mockImplementation((projectKey, boardType) => {
+        if (boardType === 'kanban') {
+          return Promise.resolve([{ id: 20, name: 'Kanban Board', type: 'kanban' }]);
+        }
+        return Promise.resolve([]);
+      }),
+      fetchSprints: vi.fn()
+    });
+
+    await discoverBoards(deps);
+
+    // fetchSprints should NOT be called for kanban boards
+    expect(deps.fetchSprints).not.toHaveBeenCalled();
+
+    const teamsCall = deps.writeStorage.mock.calls.find(c => c[0] === 'teams.json');
+    const kanbanTeam = teamsCall[1].teams.find(t => t.boardType === 'kanban');
+    expect(kanbanTeam.stale).toBe(false);
+    expect(kanbanTeam.enabled).toBe(true);
+  });
+
+  it('preserves existing kanban team config', async () => {
+    const deps = makeDeps({
+      fetchBoards: vi.fn().mockImplementation((projectKey, boardType) => {
+        if (boardType === 'kanban') {
+          return Promise.resolve([{ id: 20, name: 'Kanban Board', type: 'kanban' }]);
+        }
+        return Promise.resolve([]);
+      }),
+      fetchSprints: vi.fn(),
+      readStorage: vi.fn().mockReturnValue({
+        teams: [{
+          boardId: 20,
+          boardName: 'Kanban Board',
+          displayName: 'Custom Kanban',
+          enabled: false,
+          boardType: 'kanban',
+          manuallyConfigured: true
+        }]
+      })
+    });
+
+    await discoverBoards(deps);
+
+    const teamsCall = deps.writeStorage.mock.calls.find(c => c[0] === 'teams.json');
+    const kanbanTeam = teamsCall[1].teams.find(t => t.boardId === 20);
+    expect(kanbanTeam.displayName).toBe('Custom Kanban');
+    expect(kanbanTeam.boardType).toBe('kanban');
+  });
+});
+
+describe('performRefresh with kanban', () => {
+  it('dispatches kanban boards to processKanbanBoard', async () => {
+    const deps = makeDeps({
+      fetchBoards: vi.fn().mockResolvedValue([
+        { id: 1, name: 'Board A' }
+      ]),
+      fetchSprints: vi.fn().mockResolvedValue([]),
+      fetchSprintIssues: vi.fn().mockResolvedValue([]),
+      fetchBoardConfiguration: vi.fn().mockResolvedValue({ filterId: '555' }),
+      fetchFilterJql: vi.fn().mockResolvedValue('project = PROJ'),
+      fetchIssuesByJql: vi.fn().mockResolvedValue([]),
+      readStorage: vi.fn().mockImplementation((key) => {
+        if (key === 'teams.json') {
+          return {
+            teams: [
+              { boardId: 1, boardName: 'Scrum Board', enabled: true, boardType: 'scrum' },
+              { boardId: 20, boardName: 'Kanban Board', enabled: true, boardType: 'kanban' }
+            ]
+          };
+        }
+        return null;
+      })
+    });
+
+    const result = await performRefresh({ ...deps, hardRefresh: false });
+
+    expect(result.boardCount).toBe(2);
+    // Kanban board should use fetchBoardConfiguration
+    expect(deps.fetchBoardConfiguration).toHaveBeenCalledWith(20);
+    // Scrum board should use fetchSprints
+    expect(deps.fetchSprints).toHaveBeenCalledWith(1);
+  });
+
+  it('defaults boardType to scrum when not set in teams.json', async () => {
+    const deps = makeDeps({
+      fetchBoards: vi.fn().mockResolvedValue([
+        { id: 1, name: 'Board A' }
+      ]),
+      fetchSprints: vi.fn().mockResolvedValue([
+        { id: 100, name: 'Sprint 1', state: 'active', startDate: '2025-06-01', endDate: '2025-06-14', completeDate: null }
+      ]),
+      fetchSprintIssues: vi.fn().mockResolvedValue([]),
+      readStorage: vi.fn().mockImplementation((key) => {
+        if (key === 'teams.json') {
+          return {
+            teams: [{ boardId: 1, boardName: 'Board A', enabled: true }]
+          };
+        }
+        return null;
+      })
+    });
+
+    const result = await performRefresh({ ...deps, hardRefresh: false });
+
+    // Should process as scrum (fetchSprints called, not fetchBoardConfiguration)
+    expect(deps.fetchSprints).toHaveBeenCalledWith(1);
+    expect(result.success).toBe(true);
+  });
+
+  it('includes kanban board results in dashboard summary', async () => {
+    const deps = makeDeps({
+      fetchBoards: vi.fn().mockResolvedValue([]),
+      fetchSprints: vi.fn().mockResolvedValue([]),
+      fetchSprintIssues: vi.fn().mockResolvedValue([]),
+      fetchBoardConfiguration: vi.fn().mockResolvedValue({ filterId: '555' }),
+      fetchFilterJql: vi.fn().mockResolvedValue('project = PROJ'),
+      fetchIssuesByJql: vi.fn().mockResolvedValue([
+        { key: 'P-1', summary: 'Bug', issueType: 'Bug', activityType: 'Tech Debt & Quality', storyPoints: 3, resolution: 'Done', resolutionDate: '2025-01-10' }
+      ]),
+      readStorage: vi.fn().mockImplementation((key) => {
+        if (key === 'teams.json') {
+          return {
+            teams: [
+              { boardId: 20, boardName: 'Kanban Board', enabled: true, boardType: 'kanban', teamId: 'kanban-20' }
+            ]
+          };
+        }
+        return null;
+      })
+    });
+
+    const result = await performRefresh({ ...deps, hardRefresh: false });
+
+    const dashCall = deps.writeStorage.mock.calls.find(c => c[0] === 'dashboard-summary.json');
+    expect(dashCall).toBeDefined();
+    expect(dashCall[1].boards['kanban-20']).toBeDefined();
+    expect(dashCall[1].boards['kanban-20'].sprint.name).toBe('Last 2 weeks');
   });
 });

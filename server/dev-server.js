@@ -15,7 +15,7 @@ const express = require('express');
 const fetch = require('node-fetch');
 const { readFromStorage, writeToStorage } = require('./storage');
 const { createJiraClient } = require('../amplify/backend/function/jiraFetcher/src/shared/jira-client');
-const { discoverBoards, performRefresh, performMultiProjectRefresh, processBoard } = require('../amplify/backend/function/jiraFetcher/src/shared/orchestration');
+const { discoverBoards, performRefresh, performMultiProjectRefresh, processBoard, processKanbanBoard } = require('../amplify/backend/function/jiraFetcher/src/shared/orchestration');
 const { buildProjectSummary, buildOrgSummary } = require('../amplify/backend/function/jiraFetcher/src/shared/classification');
 const { getStoragePrefix, createPrefixedStorage } = require('../amplify/backend/function/jiraFetcher/src/shared/config');
 
@@ -166,20 +166,35 @@ app.post('/api/refresh', function(req, res) {
 
       for (const team of enabledTeams) {
         try {
-          const result = await processBoard({
-            board: {
-              id: team.boardId,
-              name: team.boardName || team.displayName,
-              teamId: team.teamId || String(team.boardId),
-              sprintFilter: team.sprintFilter || '',
-              calculationMode: team.calculationMode || 'points'
-            },
-            hardRefresh,
-            fetchSprints: deps.fetchSprints,
-            fetchSprintIssues: deps.fetchSprintIssues,
-            readStorage: deps.readStorage,
-            writeStorage: deps.writeStorage
-          });
+          const board = {
+            id: team.boardId,
+            name: team.boardName || team.displayName,
+            teamId: team.teamId || String(team.boardId),
+            sprintFilter: team.sprintFilter || '',
+            calculationMode: team.calculationMode || 'points',
+            boardType: team.boardType || 'scrum'
+          };
+
+          let result;
+          if (board.boardType === 'kanban') {
+            result = await processKanbanBoard({
+              board,
+              fetchBoardConfiguration: deps.fetchBoardConfiguration,
+              fetchFilterJql: deps.fetchFilterJql,
+              fetchIssuesByJql: deps.fetchIssuesByJql,
+              readStorage: deps.readStorage,
+              writeStorage: deps.writeStorage
+            });
+          } else {
+            result = await processBoard({
+              board,
+              hardRefresh,
+              fetchSprints: deps.fetchSprints,
+              fetchSprintIssues: deps.fetchSprintIssues,
+              readStorage: deps.readStorage,
+              writeStorage: deps.writeStorage
+            });
+          }
           boardResults.push(result);
           console.log(`  Board ${team.boardName || team.displayName}: ${result.sprintResults.length} sprints`);
         } catch (error) {

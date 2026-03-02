@@ -610,6 +610,58 @@ describe('BoardSettings', () => {
       })
     })
 
+    describe('kanban boards', () => {
+      it('shows "Kanban" badge next to kanban board names', async () => {
+        setupFetchMock({
+          teams: [
+            { boardId: 1, boardName: 'Board A', displayName: 'Scrum Board', enabled: true, boardType: 'scrum' },
+            { boardId: 2, boardName: 'Board B', displayName: 'Kanban Board', enabled: true, boardType: 'kanban' }
+          ]
+        })
+        const wrapper = await mountAndSwitchToBoards()
+
+        const groups = wrapper.findAll('[data-testid="board-group"]')
+        const kanbanGroup = groups.find(g => g.text().includes('Kanban Board'))
+        const scrumGroup = groups.find(g => g.text().includes('Scrum Board'))
+
+        expect(kanbanGroup.text()).toContain('Kanban')
+        expect(kanbanGroup.find('[data-testid="kanban-badge"]').exists()).toBe(true)
+        expect(scrumGroup.find('[data-testid="kanban-badge"]').exists()).toBe(false)
+      })
+
+      it('hides sprint filter input for kanban boards with sub-teams', async () => {
+        setupFetchMock({
+          teams: [
+            { boardId: 1, boardName: 'Scrum Board', displayName: 'Alpha', enabled: true, sprintFilter: 'Alpha', teamId: '1_alpha', boardType: 'scrum' },
+            { boardId: 1, boardName: 'Scrum Board', displayName: 'Beta', enabled: true, sprintFilter: 'Beta', teamId: '1_beta', boardType: 'scrum' },
+            { boardId: 2, boardName: 'Kanban Board', displayName: 'KTeam A', enabled: true, sprintFilter: 'A', teamId: '2_a', boardType: 'kanban' },
+            { boardId: 2, boardName: 'Kanban Board', displayName: 'KTeam B', enabled: true, sprintFilter: 'B', teamId: '2_b', boardType: 'kanban' }
+          ]
+        })
+        const wrapper = await mountAndSwitchToBoards()
+
+        const groups = wrapper.findAll('[data-testid="board-group"]')
+        const scrumGroup = groups.find(g => g.text().includes('ID: 1'))
+        const kanbanGroup = groups.find(g => g.text().includes('ID: 2'))
+
+        // Scrum board sub-teams should have sprint filter inputs
+        expect(scrumGroup.findAll('[data-testid="sprint-filter-input"]')).toHaveLength(2)
+        // Kanban board sub-teams should NOT have sprint filter inputs
+        expect(kanbanGroup.findAll('[data-testid="sprint-filter-input"]')).toHaveLength(0)
+      })
+
+      it('does not show "Kanban" badge for boards without boardType', async () => {
+        setupFetchMock({
+          teams: [
+            { boardId: 1, boardName: 'Board A', displayName: 'Default Board', enabled: true }
+          ]
+        })
+        const wrapper = await mountAndSwitchToBoards()
+
+        expect(wrapper.find('[data-testid="kanban-badge"]').exists()).toBe(false)
+      })
+    })
+
     describe('sub-teams', () => {
       it('renders an "Add Sub-Team" button per board group', async () => {
         const wrapper = await mountAndSwitchToBoards()

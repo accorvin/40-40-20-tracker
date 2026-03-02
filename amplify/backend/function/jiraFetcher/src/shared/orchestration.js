@@ -41,20 +41,34 @@ function generateTeamId(boardId, sprintFilter) {
 async function discoverBoards({ projectKey, fetchBoards, fetchSprints, readStorage, writeStorage }) {
   console.log(`Discovering boards for project ${projectKey}`);
 
-  const boards = await fetchBoards(projectKey);
-  console.log(`Found ${boards.length} scrum boards`);
+  // Fetch both scrum and kanban boards
+  const scrumBoards = await fetchBoards(projectKey);
+  let kanbanBoards = [];
+  try {
+    kanbanBoards = await fetchBoards(projectKey, 'kanban');
+  } catch (error) {
+    console.warn('Failed to fetch kanban boards:', error.message);
+  }
+
+  const boards = [
+    ...scrumBoards.map(b => ({ ...b, boardType: 'scrum' })),
+    ...kanbanBoards.map(b => ({ ...b, boardType: 'kanban' }))
+  ];
+  console.log(`Found ${scrumBoards.length} scrum boards and ${kanbanBoards.length} kanban boards`);
 
   await writeStorage('boards.json', {
     lastUpdated: new Date().toISOString(),
     boards: boards
   });
 
-  // Fetch sprints for each board to determine staleness
+  // Fetch sprints for each scrum board to determine staleness
+  // Kanban boards skip staleness check (no sprints)
   const DISCOVER_CONCURRENCY = 3;
   const boardStaleness = new Map();
 
-  for (let i = 0; i < boards.length; i += DISCOVER_CONCURRENCY) {
-    const chunk = boards.slice(i, i + DISCOVER_CONCURRENCY);
+  const scrumBoardsOnly = boards.filter(b => b.boardType !== 'kanban');
+  for (let i = 0; i < scrumBoardsOnly.length; i += DISCOVER_CONCURRENCY) {
+    const chunk = scrumBoardsOnly.slice(i, i + DISCOVER_CONCURRENCY);
     const results = await Promise.all(chunk.map(async (board) => {
       try {
         const sprints = await fetchSprints(board.id);
@@ -65,6 +79,11 @@ async function discoverBoards({ projectKey, fetchBoards, fetchSprints, readStora
       }
     }));
     results.forEach(r => boardStaleness.set(r.boardId, r));
+  }
+
+  // Mark kanban boards as not stale
+  for (const board of boards.filter(b => b.boardType === 'kanban')) {
+    boardStaleness.set(board.id, { boardId: board.id, stale: false, lastSprintEndDate: null });
   }
 
   const staleCount = [...boardStaleness.values()].filter(s => s.stale).length;
@@ -93,6 +112,7 @@ async function discoverBoards({ projectKey, fetchBoards, fetchSprints, readStora
         const updated = {
           ...existing,
           boardName: b.name,
+          boardType: b.boardType || existing.boardType || 'scrum',
           stale: staleness.stale,
           lastSprintEndDate: staleness.lastSprintEndDate
         };
@@ -110,6 +130,7 @@ async function discoverBoards({ projectKey, fetchBoards, fetchSprints, readStora
         enabled: !staleness.stale,
         stale: staleness.stale,
         lastSprintEndDate: staleness.lastSprintEndDate,
+        boardType: b.boardType || 'scrum',
         manuallyConfigured: false
       });
     }
@@ -255,6 +276,113 @@ async function processBoard({ board, hardRefresh, fetchSprints, fetchSprintIssue
 }
 
 /**
+ * Process a kanban board: fetch board config, filter JQL, issues by date range,
+ * classify, and create a synthetic sprint.
+ *
+ * Returns the same shape as processBoard for interop with dashboard summary.
+ *
+ * @param {object} deps
+ * @param {object} deps.board - { id, name, teamId?, calculationMode? }
+ * @param {function} deps.fetchBoardConfiguration - (boardId) => { filterId }
+ * @param {function} deps.fetchFilterJql - (filterId) => jql string
+ * @param {function} deps.fetchIssuesByJql - (jql) => Issue[]
+ * @param {function} deps.readStorage
+ * @param {function} deps.writeStorage
+ * @returns {Promise<{ board, sprintResults, dashboardSprint, dashboardSprintResult }>}
+ */
+async function processKanbanBoard({ board, fetchBoardConfiguration, fetchFilterJql, fetchIssuesByJql, readStorage, writeStorage }) {
+  const calculationMode = board.calculationMode || 'points';
+  const teamKey = board.teamId || `kanban-${board.id}`;
+  console.log(`Processing kanban board: ${board.name} (${board.id})`);
+
+  // Step 1: Get the board's saved filter
+  const { filterId } = await fetchBoardConfiguration(board.id);
+
+  // Step 2: Get the filter's JQL
+  const baseJql = await fetchFilterJql(filterId);
+
+  // Step 3: Build date-constrained JQL for last 2 weeks
+  const constrainedJql = `(${baseJql}) AND resolved >= -2w ORDER BY resolved DESC`;
+
+  // Step 4: Fetch issues
+  const rawIssues = await fetchIssuesByJql(constrainedJql);
+
+  // Step 5: Filter and classify
+  const filteredIssues = rawIssues.filter(issue =>
+    ALLOWED_ISSUE_TYPES.includes(issue.issueType)
+  );
+
+  const classifiedIssues = filteredIssues.map(issue => ({
+    ...issue,
+    bucket: classifyIssue(issue),
+    completed: issue.resolution != null
+  }));
+
+  const summary = buildSprintSummary(classifiedIssues, calculationMode);
+
+  // Step 6: Create synthetic sprint
+  const syntheticSprintId = `kanban-${board.id}`;
+  const syntheticSprint = {
+    id: syntheticSprintId,
+    name: 'Last 2 weeks',
+    state: 'active',
+    startDate: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString(),
+    endDate: new Date().toISOString()
+  };
+
+  // Step 7: Write sprint data
+  const sprintData = {
+    sprintId: syntheticSprintId,
+    sprintName: syntheticSprint.name,
+    sprintState: syntheticSprint.state,
+    startDate: syntheticSprint.startDate,
+    endDate: syntheticSprint.endDate,
+    completeDate: null,
+    boardId: board.id,
+    lastUpdated: new Date().toISOString(),
+    issues: classifiedIssues,
+    summary
+  };
+
+  await writeStorage(`sprints/${syntheticSprintId}.json`, sprintData);
+
+  // Step 8: Write team sprint index
+  await writeStorage(`sprints/team-${teamKey}.json`, {
+    boardId: board.id,
+    boardName: board.name,
+    lastUpdated: new Date().toISOString(),
+    sprints: [{
+      id: syntheticSprintId,
+      name: syntheticSprint.name,
+      state: syntheticSprint.state,
+      startDate: syntheticSprint.startDate,
+      endDate: syntheticSprint.endDate,
+      completeDate: null
+    }]
+  });
+
+  const sprintResult = {
+    sprintId: syntheticSprintId,
+    sprintName: syntheticSprint.name,
+    state: syntheticSprint.state,
+    issueCount: classifiedIssues.length,
+    totalPoints: summary.totalPoints,
+    summary
+  };
+
+  const filteredCount = rawIssues.length - filteredIssues.length;
+  const filterMsg = filteredCount > 0 ? ` (${filteredCount} filtered)` : '';
+  console.log(`  [${board.name}] Kanban: ${classifiedIssues.length} issues${filterMsg}, ${summary.totalPoints} pts`);
+
+  return {
+    board,
+    sprintResults: [sprintResult],
+    dashboardSprint: syntheticSprint,
+    dashboardSprintResult: sprintResult
+  };
+}
+
+/**
  * Full refresh: fetch boards, sprints, issues, classify, and generate summaries.
  *
  * @param {object} deps
@@ -267,7 +395,7 @@ async function processBoard({ board, hardRefresh, fetchSprints, fetchSprintIssue
  * @param {function} deps.writeStorage - (key, data) => void
  * @returns {Promise<{ success: boolean, projectKey: string, boardCount: number, sprintCount: number }>}
  */
-async function performRefresh({ projectKey, hardRefresh, fetchBoards, fetchSprints, fetchSprintIssues, readStorage, writeStorage }) {
+async function performRefresh({ projectKey, hardRefresh, fetchBoards, fetchSprints, fetchSprintIssues, fetchBoardConfiguration, fetchFilterJql, fetchIssuesByJql, readStorage, writeStorage }) {
   console.log(`Starting refresh for project ${projectKey} (hardRefresh: ${hardRefresh})`);
   const refreshStart = Date.now();
 
@@ -286,7 +414,8 @@ async function performRefresh({ projectKey, hardRefresh, fetchBoards, fetchSprin
       name: team.boardName,
       teamId: team.teamId || String(team.boardId),
       sprintFilter: team.sprintFilter || '',
-      calculationMode: team.calculationMode || 'points'
+      calculationMode: team.calculationMode || 'points',
+      boardType: team.boardType || 'scrum'
     }));
     const skipped = teamsData.teams.length - enabledTeams.length;
     if (skipped > 0) {
@@ -300,9 +429,12 @@ async function performRefresh({ projectKey, hardRefresh, fetchBoards, fetchSprin
 
   for (let i = 0; i < boards.length; i += CONCURRENCY) {
     const chunk = boards.slice(i, i + CONCURRENCY);
-    const chunkResults = await Promise.all(chunk.map(board =>
-      processBoard({ board, hardRefresh, fetchSprints, fetchSprintIssues, readStorage, writeStorage })
-    ));
+    const chunkResults = await Promise.all(chunk.map(board => {
+      if (board.boardType === 'kanban') {
+        return processKanbanBoard({ board, fetchBoardConfiguration, fetchFilterJql, fetchIssuesByJql, readStorage, writeStorage });
+      }
+      return processBoard({ board, hardRefresh, fetchSprints, fetchSprintIssues, readStorage, writeStorage });
+    }));
     boardResults.push(...chunkResults);
   }
 
@@ -375,7 +507,7 @@ async function performRefresh({ projectKey, hardRefresh, fetchBoards, fetchSprin
  * @param {function} deps.writeStorage - raw (unprefixed) storage write
  * @returns {Promise<{ success: boolean, projects: Array }>}
  */
-async function performMultiProjectRefresh({ projects, hardRefresh, fetchBoards, fetchSprints, fetchSprintIssues, readStorage, writeStorage }) {
+async function performMultiProjectRefresh({ projects, hardRefresh, fetchBoards, fetchSprints, fetchSprintIssues, fetchBoardConfiguration, fetchFilterJql, fetchIssuesByJql, readStorage, writeStorage }) {
   console.log(`Starting multi-project refresh for ${projects.length} projects`);
   const refreshStart = Date.now();
 
@@ -392,6 +524,9 @@ async function performMultiProjectRefresh({ projects, hardRefresh, fetchBoards, 
         fetchBoards,
         fetchSprints,
         fetchSprintIssues,
+        fetchBoardConfiguration,
+        fetchFilterJql,
+        fetchIssuesByJql,
         readStorage: prefixedRead,
         writeStorage: prefixedWrite
       });
@@ -432,4 +567,4 @@ async function performMultiProjectRefresh({ projects, hardRefresh, fetchBoards, 
   };
 }
 
-module.exports = { discoverBoards, performRefresh, processBoard, performMultiProjectRefresh, generateTeamId };
+module.exports = { discoverBoards, performRefresh, processBoard, processKanbanBoard, performMultiProjectRefresh, generateTeamId };

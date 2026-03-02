@@ -12,7 +12,7 @@ function createJiraClient({ jiraRequest, jiraHost }) {
   /**
    * Fetch all scrum boards for a project (paginated)
    */
-  async function fetchBoards(projectKey) {
+  async function fetchBoards(projectKey, boardType = 'scrum') {
     const boards = [];
     let startAt = 0;
     const maxResults = 50;
@@ -20,13 +20,14 @@ function createJiraClient({ jiraRequest, jiraHost }) {
 
     while (!isLast) {
       const data = await jiraRequest(
-        `/rest/agile/1.0/board?projectKeyOrId=${projectKey}&type=scrum&startAt=${startAt}&maxResults=${maxResults}`
+        `/rest/agile/1.0/board?projectKeyOrId=${projectKey}&type=${boardType}&startAt=${startAt}&maxResults=${maxResults}`
       );
 
       boards.push(...data.values.map(board => ({
         id: board.id,
         name: board.name,
-        projectKey: projectKey
+        projectKey: projectKey,
+        type: boardType
       })));
 
       isLast = data.isLast;
@@ -106,7 +107,63 @@ function createJiraClient({ jiraRequest, jiraHost }) {
     return issues;
   }
 
-  return { fetchBoards, fetchSprints, fetchSprintIssues };
+  /**
+   * Fetch board configuration to get the filter ID
+   */
+  async function fetchBoardConfiguration(boardId) {
+    const data = await jiraRequest(`/rest/agile/1.0/board/${boardId}/configuration`);
+    return { filterId: data.filter.id };
+  }
+
+  /**
+   * Fetch the JQL string from a saved filter
+   */
+  async function fetchFilterJql(filterId) {
+    const data = await jiraRequest(`/rest/api/2/filter/${filterId}`);
+    return data.jql;
+  }
+
+  /**
+   * Fetch issues by JQL query (paginated)
+   */
+  async function fetchIssuesByJql(jql) {
+    const issues = [];
+    let startAt = 0;
+    const maxResults = 100;
+    let total = Infinity;
+    const fields = 'summary,issuetype,status,assignee,customfield_12310243,customfield_12320040,resolution,resolutiondate';
+
+    while (startAt < total) {
+      const data = await jiraRequest(
+        `/rest/api/2/search?jql=${encodeURIComponent(jql)}&fields=${fields}&maxResults=${maxResults}&startAt=${startAt}`
+      );
+
+      total = data.total;
+
+      issues.push(...data.issues.map(issue => {
+        const storyPoints = issue.fields.customfield_12310243 ?? null;
+
+        return {
+          key: issue.key,
+          summary: issue.fields.summary,
+          issueType: issue.fields.issuetype?.name || null,
+          status: issue.fields.status?.name || null,
+          assignee: issue.fields.assignee?.displayName || null,
+          storyPoints: storyPoints,
+          activityType: issue.fields.customfield_12320040?.value || null,
+          resolution: issue.fields.resolution?.name || null,
+          resolutionDate: issue.fields.resolutiondate || null,
+          url: `${jiraHost}/browse/${issue.key}`
+        };
+      }));
+
+      startAt += maxResults;
+    }
+
+    return issues;
+  }
+
+  return { fetchBoards, fetchSprints, fetchSprintIssues, fetchBoardConfiguration, fetchFilterJql, fetchIssuesByJql };
 }
 
 module.exports = { createJiraClient };
