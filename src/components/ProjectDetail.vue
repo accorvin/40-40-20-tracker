@@ -131,8 +131,10 @@ const props = defineProps({
 defineEmits(['back', 'select-team', 'select-filter', 'create-filter', 'edit-filter', 'delete-filter'])
 
 const filteredBoards = computed(() => {
-  if (!props.activeFilter) return props.boards
-  return props.boards.filter(b => props.activeFilter.boardIds.includes(b.id))
+  const boards = props.activeFilter
+    ? props.boards.filter(b => props.activeFilter.boardIds.includes(b.id))
+    : [...props.boards]
+  return boards.sort((a, b) => (a.displayName || a.name).localeCompare(b.displayName || b.name))
 })
 
 const boardCount = computed(() => {
