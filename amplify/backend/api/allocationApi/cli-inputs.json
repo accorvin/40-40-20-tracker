@@ -30,6 +30,16 @@
       "name": "/discover-boards",
       "lambdaFunction": "jiraFetcher",
       "permissions": { "setting": "open" }
+    },
+    "/projects": {
+      "name": "/projects",
+      "lambdaFunction": "dataReader",
+      "permissions": { "setting": "open" }
+    },
+    "/org-summary": {
+      "name": "/org-summary",
+      "lambdaFunction": "dataReader",
+      "permissions": { "setting": "open" }
     }
   }
 }
