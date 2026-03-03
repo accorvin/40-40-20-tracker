@@ -34,6 +34,16 @@ describe('classifyIssue', () => {
   it('classifies unknown activityType as uncategorized', () => {
     expect(classifyIssue({ activityType: 'Something Else' })).toBe('uncategorized');
   });
+
+  it('classifies Vulnerability issue type as tech-debt-quality regardless of activityType', () => {
+    expect(classifyIssue({ issueType: 'Vulnerability', activityType: null })).toBe('tech-debt-quality');
+    expect(classifyIssue({ issueType: 'Vulnerability', activityType: 'New Features' })).toBe('tech-debt-quality');
+  });
+
+  it('classifies Weakness issue type as tech-debt-quality regardless of activityType', () => {
+    expect(classifyIssue({ issueType: 'Weakness', activityType: null })).toBe('tech-debt-quality');
+    expect(classifyIssue({ issueType: 'Weakness', activityType: 'New Features' })).toBe('tech-debt-quality');
+  });
 });
 
 describe('buildSprintSummary', () => {

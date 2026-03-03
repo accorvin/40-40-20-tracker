@@ -12,6 +12,10 @@ const STALE_THRESHOLD_MS = 90 * 24 * 60 * 60 * 1000;
  * Classify an issue into a 40-40-20 bucket based on Activity Type custom field
  */
 function classifyIssue(issue) {
+  if (issue.issueType === 'Vulnerability' || issue.issueType === 'Weakness') {
+    return 'tech-debt-quality';
+  }
+
   switch (issue.activityType) {
     case 'Tech Debt & Quality':
       return 'tech-debt-quality';
