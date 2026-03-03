@@ -155,6 +155,95 @@ Browser → Firebase Auth → Vue 3 SPA
 - **dataReader** serves cached data from S3 to the frontend
 - The local dev server (`server/dev-server.js`) combines both roles using the filesystem instead of S3
 
+## How Data Is Pulled from Jira
+
+### Overview
+
+The data pipeline runs in two phases: **board discovery** (which boards/teams exist) and **refresh** (fetching sprint and issue data for each board). Both phases use the Jira Agile and REST APIs and store results as JSON in S3 (or the local filesystem during development).
+
+### Phase 1: Board Discovery
+
+The `/discover-boards` endpoint triggers discovery for a given Jira project key (default: `RHOAIENG`):
+
+1. **Fetch boards** — Queries `/rest/agile/1.0/board?projectKeyOrId={key}` for both `scrum` and `kanban` board types. Results are paginated (50 per page).
+2. **Check staleness** — For each scrum board, fetches its sprints and determines whether the board is stale. A board is stale if it has no active/future sprints and its most recent closed sprint ended more than 90 days ago. Kanban boards are never marked stale.
+3. **Merge team config** — Discovered boards are merged with the existing `teams.json` config. Existing entries preserve their `enabled`, `displayName`, `sprintFilter`, and `calculationMode` settings. New scrum boards default to enabled (unless stale); new kanban boards default to disabled. Stale boards that were not manually configured are auto-disabled.
+
+### Phase 2: Data Refresh
+
+The `/refresh` endpoint triggers a full data refresh. In production this fans out via SQS (one message per board for parallel processing); locally it runs sequentially.
+
+#### Scrum boards
+
+For each enabled scrum board:
+
+1. **Fetch sprints** — Queries `/rest/agile/1.0/board/{boardId}/sprint` (paginated). If the team has a `sprintFilter` configured, only sprints whose name contains the filter string are kept.
+2. **Select sprints to process** — All active sprints, all future sprints, and the 5 most recent closed sprints are processed.
+3. **Closed-sprint caching** — Closed sprints that already have cached data in storage are skipped (unless `hardRefresh` is true), since their data is immutable.
+4. **Fetch issues** — For each sprint, queries `/rest/agile/1.0/sprint/{sprintId}/issue` (paginated, 100 per page). Fields fetched: `summary`, `issuetype`, `status`, `assignee`, `customfield_12310243` (story points), `customfield_12320040` (Activity Type), `resolution`, `resolutiondate`.
+5. **Filter issue types** — Only `Bug`, `Task`, `Story`, `Spike`, `Vulnerability`, and `Weakness` issue types are kept. Sub-tasks, Epics, Initiatives, and other meta-level types are excluded.
+6. **Classify and store** — Each issue is classified into a bucket (see below), marked as completed or not based on its resolution status, and the full sprint data (issues + summary) is written to storage.
+
+#### Kanban boards
+
+For each enabled kanban board:
+
+1. **Get board filter** — Fetches the board's saved filter via `/rest/agile/1.0/board/{boardId}/configuration`.
+2. **Build JQL** — Takes the filter's base JQL and constrains it to issues resolved in the last 2 weeks: `({baseJql}) AND resolved >= -2w ORDER BY resolved DESC`.
+3. **Fetch, filter, classify** — Issues are fetched via `/rest/api/2/search`, then filtered and classified the same way as scrum boards.
+4. **Synthetic sprint** — A synthetic "Last 2 weeks" sprint is created since kanban boards don't have real sprints.
+
+#### Dashboard summary
+
+After all boards are processed, a `dashboard-summary.json` is generated containing the active sprint summary for each team. This powers the main dashboard grid without requiring per-team API calls.
+
+### Jira Custom Fields
+
+| Custom Field ID | Name | Usage |
+|----------------|------|-------|
+| `customfield_12310243` | Story Points | Used for point-based allocation calculations |
+| `customfield_12320040` | Activity Type | Determines which 40-40-20 bucket an issue belongs to |
+
+## How Per-Team Metrics Are Calculated
+
+### Bucket Classification
+
+Every issue is classified into one of four buckets based on its **Activity Type** custom field value:
+
+| Activity Type Value | Bucket | Target |
+|--------------------|--------|--------|
+| `Tech Debt & Quality` | tech-debt-quality | 40% |
+| `New Features` | new-features | 40% |
+| `Learning & Enablement` | learning-enablement | 20% |
+| _(missing or unrecognized)_ | uncategorized | — |
+
+### Calculation Modes
+
+Each team can be configured with a calculation mode:
+
+- **`points`** (default) — Allocation percentages are based on story point totals. Issues without story points are counted as "unestimated" and flagged in the UI but do not contribute to percentage calculations.
+- **`counts`** — Allocation percentages are based on raw issue counts, regardless of story points. Useful for teams that don't estimate.
+
+### Sprint Summary
+
+For each sprint, a summary is computed with:
+
+- **Per-bucket totals** — Points, issue count, completed points, and completed count for each bucket
+- **Overall totals** — Total points, total issue count, estimated vs. unestimated issue counts
+- **Completion stats** — For closed sprints, completed points/counts per bucket enable completion rate calculations
+
+### Rollup Summaries
+
+Summaries aggregate upward through three levels:
+
+1. **Sprint** — Per-sprint, per-team summary (described above)
+2. **Project** — Aggregates across all enabled boards in a project. Uses weighted percentages: each board's contribution to the overall percentage is weighted by its total points (or total count if using `counts` mode), so larger sprints have proportionally more influence.
+3. **Org** — Aggregates across all projects. Written to `data/org-summary.json`.
+
+### Multi-Project Support
+
+Data for each project is namespaced under `data/{PROJECT_KEY}/` in storage, keeping boards, teams, sprints, and dashboard summaries isolated. The org-level summary rolls up across all configured projects.
+
 ## Deployment
 
 This project uses AWS Amplify for deployment. All AWS/Amplify CLI commands require SAML authentication:
