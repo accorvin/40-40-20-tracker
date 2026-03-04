@@ -395,6 +395,46 @@ describe('performRefresh', () => {
     expect(dashCall[1].boards['1']).toBeDefined();
   });
 
+  it('continues processing remaining boards when one board fails', async () => {
+    const deps = makeDeps({
+      fetchBoards: vi.fn().mockResolvedValue([
+        { id: 1, name: 'Board A' }
+      ]),
+      fetchSprints: vi.fn().mockImplementation((boardId) => {
+        if (boardId === 1) throw new Error('Jira API timeout');
+        return Promise.resolve([]);
+      }),
+      fetchSprintIssues: vi.fn().mockResolvedValue([]),
+      fetchBoardConfiguration: vi.fn().mockResolvedValue({ filterId: '555' }),
+      fetchFilterJql: vi.fn().mockResolvedValue('project = PROJ'),
+      fetchIssuesByJql: vi.fn().mockResolvedValue([
+        { key: 'P-1', summary: 'Bug', issueType: 'Bug', activityType: 'Tech Debt & Quality', storyPoints: 3, resolution: 'Done', resolutionDate: '2025-01-10' }
+      ]),
+      readStorage: vi.fn().mockImplementation((key) => {
+        if (key === 'teams.json') {
+          return {
+            teams: [
+              { boardId: 1, boardName: 'Failing Board', enabled: true, boardType: 'scrum' },
+              { boardId: 20, boardName: 'Kanban Board', enabled: true, boardType: 'kanban', teamId: 'kanban-20' }
+            ]
+          };
+        }
+        return null;
+      })
+    });
+
+    const result = await performRefresh({ ...deps, hardRefresh: false });
+
+    // Should still succeed overall
+    expect(result.success).toBe(true);
+    // Only 1 board succeeded (the kanban one)
+    expect(result.boardCount).toBe(1);
+    // Dashboard summary should have the successful board
+    const dashCall = deps.writeStorage.mock.calls.find(c => c[0] === 'dashboard-summary.json');
+    expect(dashCall).toBeDefined();
+    expect(dashCall[1].boards['kanban-20']).toBeDefined();
+  });
+
   it('auto-generates teams.json if missing', async () => {
     const deps = makeDeps({
       fetchBoards: vi.fn().mockResolvedValue([
@@ -829,6 +869,25 @@ describe('processKanbanBoard', () => {
     expect(deps.fetchIssuesByJql).toHaveBeenCalledWith(
       expect.stringContaining('resolved >= -2w')
     );
+  });
+
+  it('strips ORDER BY from base JQL before appending date constraint', async () => {
+    const deps = makeKanbanDeps({
+      fetchFilterJql: vi.fn().mockResolvedValue('project = PROJ AND component = "Notebooks" ORDER BY Priority DESC'),
+      fetchIssuesByJql: vi.fn().mockResolvedValue([])
+    });
+
+    await processKanbanBoard(deps);
+
+    const jqlArg = deps.fetchIssuesByJql.mock.calls[0][0];
+    // Should NOT have nested ORDER BY
+    expect(jqlArg).not.toMatch(/ORDER BY.*ORDER BY/i);
+    // Should have the stripped base JQL wrapped in parens
+    expect(jqlArg).toContain('(project = PROJ AND component = "Notebooks")');
+    // Should end with our ORDER BY
+    expect(jqlArg).toMatch(/ORDER BY resolved DESC$/);
+    // Should include the date constraint
+    expect(jqlArg).toContain('resolved >= -2w');
   });
 
   it('creates a synthetic sprint with "Last 2 weeks" name', async () => {

@@ -304,7 +304,9 @@ async function processKanbanBoard({ board, fetchBoardConfiguration, fetchFilterJ
   const baseJql = await fetchFilterJql(filterId);
 
   // Step 3: Build date-constrained JQL for last 2 weeks
-  const constrainedJql = `(${baseJql}) AND resolved >= -2w ORDER BY resolved DESC`;
+  // Strip any existing ORDER BY clause — wrapping in parens with an inner ORDER BY is invalid JQL
+  const strippedJql = baseJql.replace(/\s+ORDER\s+BY\s+.+$/i, '');
+  const constrainedJql = `(${strippedJql}) AND resolved >= -2w ORDER BY resolved DESC`;
 
   // Step 4: Fetch issues
   const rawIssues = await fetchIssuesByJql(constrainedJql);
@@ -425,19 +427,26 @@ async function performRefresh({ projectKey, hardRefresh, fetchBoards, fetchSprin
     }
   }
 
-  // Step 2: Process boards in parallel
+  // Step 2: Process boards in parallel (allSettled so one failure doesn't kill the refresh)
   const CONCURRENCY = 2;
   const boardResults = [];
 
   for (let i = 0; i < boards.length; i += CONCURRENCY) {
     const chunk = boards.slice(i, i + CONCURRENCY);
-    const chunkResults = await Promise.all(chunk.map(board => {
+    const chunkSettled = await Promise.allSettled(chunk.map(board => {
       if (board.boardType === 'kanban') {
         return processKanbanBoard({ board, fetchBoardConfiguration, fetchFilterJql, fetchIssuesByJql, readStorage, writeStorage });
       }
       return processBoard({ board, hardRefresh, fetchSprints, fetchSprintIssues, readStorage, writeStorage });
     }));
-    boardResults.push(...chunkResults);
+    for (let j = 0; j < chunkSettled.length; j++) {
+      const result = chunkSettled[j];
+      if (result.status === 'fulfilled') {
+        boardResults.push(result.value);
+      } else {
+        console.error(`Failed to process board ${chunk[j].name} (${chunk[j].id}):`, result.reason?.message || result.reason);
+      }
+    }
   }
 
   // Step 3: Upload boards index
@@ -483,13 +492,15 @@ async function performRefresh({ projectKey, hardRefresh, fetchBoards, fetchSprin
   await writeStorage('dashboard-summary.json', dashboardSummary);
 
   const allSprintResults = boardResults.flatMap(r => r.sprintResults);
+  const failedCount = boards.length - boardResults.length;
   const refreshElapsed = ((Date.now() - refreshStart) / 1000).toFixed(1);
-  console.log(`Refresh complete: ${boards.length} boards, ${allSprintResults.length} sprints (${refreshElapsed}s)`);
+  console.log(`Refresh complete: ${boardResults.length}/${boards.length} boards succeeded, ${allSprintResults.length} sprints (${refreshElapsed}s)`);
 
   return {
     success: true,
     projectKey,
-    boardCount: boards.length,
+    boardCount: boardResults.length,
+    failedBoardCount: failedCount,
     sprintCount: allSprintResults.length,
     dashboardSummary
   };
