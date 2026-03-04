@@ -280,6 +280,23 @@ async function processSqsMessage(message) {
     });
   }
 
+  // Update dashboard-summary.json with this board's latest result
+  if (result.dashboardSprint && result.dashboardSprintResult) {
+    const existing = await deps.readStorage('dashboard-summary.json') || { lastUpdated: null, boards: {} };
+    existing.boards[board.teamId] = {
+      sprint: {
+        id: result.dashboardSprint.id,
+        name: result.dashboardSprint.name,
+        state: result.dashboardSprint.state,
+        startDate: result.dashboardSprint.startDate,
+        endDate: result.dashboardSprint.endDate
+      },
+      summary: result.dashboardSprintResult.summary
+    };
+    existing.lastUpdated = new Date().toISOString();
+    await deps.writeStorage('dashboard-summary.json', existing);
+  }
+
   console.log(`Processed board ${boardName} (${boardId}): ${result.sprintResults.length} sprints`);
   return { success: true, boardId, sprintCount: result.sprintResults.length };
 }
