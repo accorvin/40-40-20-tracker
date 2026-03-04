@@ -417,7 +417,7 @@ export default {
         const activeSprint = this.teamSprints.find(s => s.state === 'active')
         const selectedSprint = savedSprint || activeSprint || [...this.teamSprints]
           .filter(s => s.state === 'closed')
-          .sort((a, b) => new Date(b.startDate) - new Date(a.startDate))[0] || null
+          .sort((a, b) => new Date(b.completeDate || 0) - new Date(a.completeDate || 0))[0] || null
 
         if (selectedSprint) {
           this.selectedSprint = selectedSprint
