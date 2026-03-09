@@ -260,24 +260,33 @@ async function processSqsMessage(message) {
   };
 
   let result;
-  if (board.boardType === 'kanban') {
-    result = await sharedProcessKanbanBoard({
-      board,
-      fetchBoardConfiguration: deps.fetchBoardConfiguration,
-      fetchFilterJql: deps.fetchFilterJql,
-      fetchIssuesByJql: deps.fetchIssuesByJql,
-      readStorage: deps.readStorage,
-      writeStorage: deps.writeStorage
-    });
-  } else {
-    result = await sharedProcessBoard({
-      board,
-      hardRefresh: hardRefresh || false,
-      fetchSprints: deps.fetchSprints,
-      fetchSprintIssues: deps.fetchSprintIssues,
-      readStorage: deps.readStorage,
-      writeStorage: deps.writeStorage
-    });
+  try {
+    if (board.boardType === 'kanban') {
+      result = await sharedProcessKanbanBoard({
+        board,
+        fetchBoardConfiguration: deps.fetchBoardConfiguration,
+        fetchFilterJql: deps.fetchFilterJql,
+        fetchIssuesByJql: deps.fetchIssuesByJql,
+        readStorage: deps.readStorage,
+        writeStorage: deps.writeStorage
+      });
+    } else {
+      result = await sharedProcessBoard({
+        board,
+        hardRefresh: hardRefresh || false,
+        fetchSprints: deps.fetchSprints,
+        fetchSprintIssues: deps.fetchSprintIssues,
+        readStorage: deps.readStorage,
+        writeStorage: deps.writeStorage
+      });
+    }
+  } catch (error) {
+    // Board was deleted or token lost access — log and return success so SQS doesn't retry
+    if (error.message?.includes('(404)')) {
+      console.warn(`Board ${boardName} (${boardId}) returned 404 — board may have been deleted or is inaccessible. Skipping.`);
+      return { success: false, boardId, error: 'board_not_found' };
+    }
+    throw error;
   }
 
   // Update dashboard-summary.json with this board's latest result
