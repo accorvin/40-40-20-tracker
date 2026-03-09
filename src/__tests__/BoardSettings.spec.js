@@ -39,7 +39,7 @@ const mockTeams = [
 
 function setupFetchMock(overrides = {}) {
   fetch.mockImplementation((url, options) => {
-    if (url.endsWith('/teams') && (!options || options.method === 'GET' || !options.method)) {
+    if (url.includes('/teams') && !url.includes('/teams/') && (!options || options.method === 'GET' || !options.method)) {
       return Promise.resolve({
         ok: true,
         json: async () => ({ teams: overrides.teams ?? mockTeams })
@@ -340,6 +340,16 @@ describe('BoardSettings', () => {
       expect(wrapper.text()).toContain('Gamma')
     })
 
+    it('passes selected project key to getTeams API call', async () => {
+      const wrapper = await mountAndSwitchToBoards()
+
+      const teamsCall = fetch.mock.calls.find(
+        ([url, opts]) => url.includes('/teams') && (!opts || opts.method === 'GET' || !opts.method)
+      )
+      // Should include the first project key as query param
+      expect(teamsCall[0]).toContain('project=RHOAIENG')
+    })
+
     it('renders toggle switches for each board', async () => {
       const wrapper = await mountAndSwitchToBoards()
 
@@ -423,7 +433,7 @@ describe('BoardSettings', () => {
 
       // Reset to track new calls
       const callCountBefore = fetch.mock.calls.filter(
-        ([url, opts]) => url.endsWith('/teams') && (!opts || opts.method === 'GET' || !opts.method)
+        ([url, opts]) => url.includes('/teams') && !url.includes('/teams/') && (!opts || opts.method === 'GET' || !opts.method)
       ).length
 
       const discoverButton = wrapper.findAll('button').find(b => b.text().includes('Discover'))
@@ -431,7 +441,7 @@ describe('BoardSettings', () => {
       await flushPromises()
 
       const callCountAfter = fetch.mock.calls.filter(
-        ([url, opts]) => url.endsWith('/teams') && (!opts || opts.method === 'GET' || !opts.method)
+        ([url, opts]) => url.includes('/teams') && !url.includes('/teams/') && (!opts || opts.method === 'GET' || !opts.method)
       ).length
 
       // Should have made another GET /teams call after discover

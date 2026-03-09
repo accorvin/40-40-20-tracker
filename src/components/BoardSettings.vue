@@ -541,7 +541,7 @@ async function handleSaveProjects() {
 // Boards tab methods
 async function loadTeams() {
   try {
-    const data = await getTeams()
+    const data = await getTeams(selectedProjectKey.value)
     teams.value = (data.teams || []).map(t => ({
       ...t,
       calculationMode: t.calculationMode || 'points',

@@ -231,11 +231,12 @@ export async function getSprintIssues(sprintId, { signal, projectKey } = {}) {
  * Get team configuration from S3
  * @returns {Promise<{teams: Array}>}
  */
-export async function getTeams() {
+export async function getTeams(projectKey) {
   try {
     const token = await getAuthToken()
+    const query = projectKey ? `?project=${encodeURIComponent(projectKey)}` : ''
 
-    const response = await fetch(`${API_ENDPOINT}/teams`, {
+    const response = await fetch(`${API_ENDPOINT}/teams${query}`, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${token}`
