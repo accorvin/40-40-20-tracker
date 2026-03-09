@@ -18,6 +18,7 @@ const fetch = require('node-fetch');
 const { verifyFirebaseToken } = require('./verifyToken');
 const { createJiraClient } = require('./shared/jira-client');
 const { discoverBoards, performRefresh: sharedPerformRefresh, performMultiProjectRefresh: sharedMultiProjectRefresh, processBoard: sharedProcessBoard, processKanbanBoard: sharedProcessKanbanBoard } = require('./shared/orchestration');
+const { buildProjectSummary, buildOrgSummary } = require('./shared/classification');
 const { getStoragePrefix, createPrefixedStorage } = require('./shared/config');
 
 const app = express();
@@ -304,6 +305,17 @@ async function processSqsMessage(message) {
     };
     existing.lastUpdated = new Date().toISOString();
     await deps.writeStorage('dashboard-summary.json', existing);
+
+    // Rebuild org-summary from the updated dashboard summary
+    const boardSummaries = Object.values(existing.boards)
+      .filter(b => b.summary)
+      .map(b => b.summary);
+    const projSummary = buildProjectSummary(boardSummaries);
+    const orgSummary = buildOrgSummary([projSummary]);
+    await uploadToS3('data/org-summary.json', {
+      lastUpdated: existing.lastUpdated,
+      ...orgSummary
+    });
   }
 
   console.log(`Processed board ${boardName} (${boardId}): ${result.sprintResults.length} sprints`);
