@@ -99,7 +99,7 @@ describe('createJiraClient', () => {
   });
 
   describe('fetchFilterJql', () => {
-    it('fetches JQL from a filter', async () => {
+    it('fetches JQL from a filter using v3 API', async () => {
       const jiraRequest = vi.fn().mockResolvedValueOnce({
         id: '12345',
         name: 'My Filter',
@@ -110,14 +110,13 @@ describe('createJiraClient', () => {
       const result = await client.fetchFilterJql('12345');
 
       expect(result).toBe('project = PROJ AND type = Bug');
-      expect(jiraRequest).toHaveBeenCalledWith('/rest/api/2/filter/12345');
+      expect(jiraRequest).toHaveBeenCalledWith('/rest/api/3/filter/12345');
     });
   });
 
   describe('fetchIssuesByJql', () => {
-    it('fetches and transforms issues by JQL', async () => {
+    it('fetches and transforms issues via POST to v3 search endpoint', async () => {
       const jiraRequest = vi.fn().mockResolvedValueOnce({
-        total: 1,
         issues: [
           {
             key: 'PROJ-1',
@@ -126,13 +125,14 @@ describe('createJiraClient', () => {
               issuetype: { name: 'Bug' },
               status: { name: 'Done' },
               assignee: { displayName: 'Alice' },
-              customfield_12310243: 3,
-              customfield_12320040: { value: 'Tech Debt & Quality' },
+              customfield_10028: 3,
+              customfield_10464: { value: 'Tech Debt & Quality' },
               resolution: { name: 'Done' },
               resolutiondate: '2025-01-10'
             }
           }
-        ]
+        ],
+        isLast: true
       });
 
       const client = createJiraClient({ jiraRequest, jiraHost });
@@ -151,19 +151,29 @@ describe('createJiraClient', () => {
         resolutionDate: '2025-01-10',
         url: 'https://jira.example.com/browse/PROJ-1'
       });
-      expect(jiraRequest.mock.calls[0][0]).toContain('/rest/api/2/search?jql=');
-      expect(jiraRequest.mock.calls[0][0]).toContain('project%20%3D%20PROJ');
+      // Verify POST with correct path and body
+      expect(jiraRequest).toHaveBeenCalledWith(
+        '/rest/api/3/search/jql',
+        expect.objectContaining({
+          method: 'POST',
+          body: expect.objectContaining({
+            jql: 'project = PROJ',
+            maxResults: 100
+          })
+        })
+      );
     });
 
-    it('paginates when total exceeds maxResults', async () => {
+    it('paginates using cursor-based nextPageToken', async () => {
       const jiraRequest = vi.fn()
         .mockResolvedValueOnce({
-          total: 101,
-          issues: [{ key: 'PROJ-1', fields: { summary: 'A', issuetype: { name: 'Bug' }, status: { name: 'Done' }, assignee: null, customfield_12310243: null, customfield_12320040: null, resolution: null, resolutiondate: null } }]
+          issues: [{ key: 'PROJ-1', fields: { summary: 'A', issuetype: { name: 'Bug' }, status: { name: 'Done' }, assignee: null, customfield_10028: null, customfield_10464: null, resolution: null, resolutiondate: null } }],
+          nextPageToken: 'token-page-2',
+          isLast: false
         })
         .mockResolvedValueOnce({
-          total: 101,
-          issues: [{ key: 'PROJ-2', fields: { summary: 'B', issuetype: { name: 'Story' }, status: { name: 'Done' }, assignee: null, customfield_12310243: null, customfield_12320040: null, resolution: null, resolutiondate: null } }]
+          issues: [{ key: 'PROJ-2', fields: { summary: 'B', issuetype: { name: 'Story' }, status: { name: 'Done' }, assignee: null, customfield_10028: null, customfield_10464: null, resolution: null, resolutiondate: null } }],
+          isLast: true
         });
 
       const client = createJiraClient({ jiraRequest, jiraHost });
@@ -171,23 +181,53 @@ describe('createJiraClient', () => {
 
       expect(issues).toHaveLength(2);
       expect(jiraRequest).toHaveBeenCalledTimes(2);
-      expect(jiraRequest.mock.calls[0][0]).toContain('startAt=0');
-      expect(jiraRequest.mock.calls[1][0]).toContain('startAt=100');
+      // First call: no nextPageToken
+      expect(jiraRequest.mock.calls[0][1].body).not.toHaveProperty('nextPageToken');
+      // Second call: includes nextPageToken from first response
+      expect(jiraRequest.mock.calls[1][1].body.nextPageToken).toBe('token-page-2');
     });
 
-    it('requests the correct fields', async () => {
+    it('terminates when isLast is true', async () => {
       const jiraRequest = vi.fn().mockResolvedValueOnce({
-        total: 0,
-        issues: []
+        issues: [{ key: 'PROJ-1', fields: { summary: 'A', issuetype: { name: 'Bug' }, status: { name: 'Done' }, assignee: null, customfield_10028: null, customfield_10464: null, resolution: null, resolutiondate: null } }],
+        isLast: true,
+        nextPageToken: 'should-not-be-used'
+      });
+
+      const client = createJiraClient({ jiraRequest, jiraHost });
+      const issues = await client.fetchIssuesByJql('project = PROJ');
+
+      expect(issues).toHaveLength(1);
+      expect(jiraRequest).toHaveBeenCalledTimes(1);
+    });
+
+    it('terminates when nextPageToken is absent (no isLast field)', async () => {
+      const jiraRequest = vi.fn().mockResolvedValueOnce({
+        issues: [{ key: 'PROJ-1', fields: { summary: 'A', issuetype: { name: 'Bug' }, status: { name: 'Done' }, assignee: null, customfield_10028: null, customfield_10464: null, resolution: null, resolutiondate: null } }]
+        // No isLast, no nextPageToken
+      });
+
+      const client = createJiraClient({ jiraRequest, jiraHost });
+      const issues = await client.fetchIssuesByJql('project = PROJ');
+
+      expect(issues).toHaveLength(1);
+      expect(jiraRequest).toHaveBeenCalledTimes(1);
+    });
+
+    it('requests the correct fields including Cloud custom field IDs', async () => {
+      const jiraRequest = vi.fn().mockResolvedValueOnce({
+        issues: [],
+        isLast: true
       });
 
       const client = createJiraClient({ jiraRequest, jiraHost });
       await client.fetchIssuesByJql('project = PROJ');
 
-      expect(jiraRequest.mock.calls[0][0]).toContain('customfield_12310243');
-      expect(jiraRequest.mock.calls[0][0]).toContain('customfield_12320040');
-      expect(jiraRequest.mock.calls[0][0]).toContain('resolution');
-      expect(jiraRequest.mock.calls[0][0]).toContain('resolutiondate');
+      const body = jiraRequest.mock.calls[0][1].body;
+      expect(body.fields).toContain('customfield_10028');
+      expect(body.fields).toContain('customfield_10464');
+      expect(body.fields).toContain('resolution');
+      expect(body.fields).toContain('resolutiondate');
     });
   });
 
@@ -242,8 +282,8 @@ describe('createJiraClient', () => {
               issuetype: { name: 'Bug' },
               status: { name: 'Done' },
               assignee: { displayName: 'Alice' },
-              customfield_12310243: 3,
-              customfield_12320040: { value: 'Tech Debt & Quality' },
+              customfield_10028: 3,
+              customfield_10464: { value: 'Tech Debt & Quality' },
               resolution: { name: 'Done' },
               resolutiondate: '2025-01-10'
             }
@@ -255,8 +295,8 @@ describe('createJiraClient', () => {
               issuetype: { name: 'Story' },
               status: { name: 'In Progress' },
               assignee: null,
-              customfield_12310243: null,
-              customfield_12320040: null,
+              customfield_10028: null,
+              customfield_10464: null,
               resolution: null,
               resolutiondate: null
             }
@@ -289,11 +329,11 @@ describe('createJiraClient', () => {
       const jiraRequest = vi.fn()
         .mockResolvedValueOnce({
           total: 101,
-          issues: [{ key: 'PROJ-1', fields: { summary: 'A', issuetype: { name: 'Bug' }, status: { name: 'Done' }, assignee: null, customfield_12310243: null, customfield_12320040: null, resolution: null, resolutiondate: null } }]
+          issues: [{ key: 'PROJ-1', fields: { summary: 'A', issuetype: { name: 'Bug' }, status: { name: 'Done' }, assignee: null, customfield_10028: null, customfield_10464: null, resolution: null, resolutiondate: null } }]
         })
         .mockResolvedValueOnce({
           total: 101,
-          issues: [{ key: 'PROJ-2', fields: { summary: 'B', issuetype: { name: 'Story' }, status: { name: 'Done' }, assignee: null, customfield_12310243: null, customfield_12320040: null, resolution: null, resolutiondate: null } }]
+          issues: [{ key: 'PROJ-2', fields: { summary: 'B', issuetype: { name: 'Story' }, status: { name: 'Done' }, assignee: null, customfield_10028: null, customfield_10464: null, resolution: null, resolutiondate: null } }]
         });
 
       const client = createJiraClient({ jiraRequest, jiraHost });
@@ -314,8 +354,8 @@ describe('createJiraClient', () => {
       const client = createJiraClient({ jiraRequest, jiraHost });
       await client.fetchSprintIssues(200);
 
-      expect(jiraRequest.mock.calls[0][0]).toContain('customfield_12310243');
-      expect(jiraRequest.mock.calls[0][0]).toContain('customfield_12320040');
+      expect(jiraRequest.mock.calls[0][0]).toContain('customfield_10028');
+      expect(jiraRequest.mock.calls[0][0]).toContain('customfield_10464');
     });
   });
 });

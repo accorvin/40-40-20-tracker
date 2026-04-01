@@ -46,7 +46,7 @@ Required variables:
 | Variable | Description |
 |----------|-------------|
 | `JIRA_TOKEN` | Jira personal access token |
-| `JIRA_HOST` | Jira instance URL (default: `https://issues.redhat.com`) |
+| `JIRA_HOST` | Jira instance URL (default: `https://redhat.atlassian.net`) |
 | `VITE_FIREBASE_API_KEY` | Firebase web API key |
 
 Optional variables:
@@ -180,7 +180,7 @@ For each enabled scrum board:
 1. **Fetch sprints** — Queries `/rest/agile/1.0/board/{boardId}/sprint` (paginated). If the team has a `sprintFilter` configured, only sprints whose name contains the filter string are kept.
 2. **Select sprints to process** — All active sprints, all future sprints, and the 5 most recent closed sprints are processed.
 3. **Closed-sprint caching** — Closed sprints that already have cached data in storage are skipped (unless `hardRefresh` is true), since their data is immutable.
-4. **Fetch issues** — For each sprint, queries `/rest/agile/1.0/sprint/{sprintId}/issue` (paginated, 100 per page). Fields fetched: `summary`, `issuetype`, `status`, `assignee`, `customfield_12310243` (story points), `customfield_12320040` (Activity Type), `resolution`, `resolutiondate`.
+4. **Fetch issues** — For each sprint, queries `/rest/agile/1.0/sprint/{sprintId}/issue` (paginated, 100 per page). Fields fetched: `summary`, `issuetype`, `status`, `assignee`, `customfield_10028` (story points), `customfield_10464` (Activity Type), `resolution`, `resolutiondate`.
 5. **Filter issue types** — Only `Bug`, `Task`, `Story`, `Spike`, `Vulnerability`, and `Weakness` issue types are kept. Sub-tasks, Epics, Initiatives, and other meta-level types are excluded.
 6. **Classify and store** — Each issue is classified into a bucket (see below), marked as completed or not based on its resolution status, and the full sprint data (issues + summary) is written to storage.
 
@@ -190,7 +190,7 @@ For each enabled kanban board:
 
 1. **Get board filter** — Fetches the board's saved filter via `/rest/agile/1.0/board/{boardId}/configuration`.
 2. **Build JQL** — Takes the filter's base JQL and constrains it to issues resolved in the last 2 weeks: `({baseJql}) AND resolved >= -2w ORDER BY resolved DESC`.
-3. **Fetch, filter, classify** — Issues are fetched via `/rest/api/2/search`, then filtered and classified the same way as scrum boards.
+3. **Fetch, filter, classify** — Issues are fetched via `POST /rest/api/3/search/jql`, then filtered and classified the same way as scrum boards.
 4. **Synthetic sprint** — A synthetic "Last 2 weeks" sprint is created since kanban boards don't have real sprints.
 
 #### Dashboard summary
@@ -201,8 +201,8 @@ After all boards are processed, a `dashboard-summary.json` is generated containi
 
 | Custom Field ID | Name | Usage |
 |----------------|------|-------|
-| `customfield_12310243` | Story Points | Used for point-based allocation calculations |
-| `customfield_12320040` | Activity Type | Determines which 40-40-20 bucket an issue belongs to |
+| `customfield_10028` | Story Points | Used for point-based allocation calculations |
+| `customfield_10464` | Activity Type | Determines which 40-40-20 bucket an issue belongs to |
 
 ## How Per-Team Metrics Are Calculated
 
@@ -253,7 +253,7 @@ rh-aws-saml-login iaps-rhods-odh-dev amplify push      # Deploy backend
 rh-aws-saml-login iaps-rhods-odh-dev amplify publish    # Deploy frontend + backend
 ```
 
-The Jira token is stored in AWS SSM Parameter Store at `/40-40-20-tracker/dev/jira-token`.
+The Jira token is stored in AWS SSM Parameter Store at `/jira-tracker-app/dev/jira-token`.
 
 ## License
 

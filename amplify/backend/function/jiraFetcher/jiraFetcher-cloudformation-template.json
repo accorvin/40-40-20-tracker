@@ -31,7 +31,11 @@
     "jiraTokenParameterName": {
       "Type": "String",
       "Description": "SSM Parameter Store path for Jira API token",
-      "Default": "/40-40-20-tracker/dev/jira-token"
+      "Default": "/jira-tracker-app/dev/jira-token"
+    },
+    "jiraEmail": {
+      "Type": "String",
+      "Description": "Email address for Jira Cloud API authentication"
     }
   },
   "Conditions": {
@@ -113,6 +117,9 @@
             },
             "BOARD_REFRESH_QUEUE_URL": {
               "Ref": "BoardRefreshQueue"
+            },
+            "JIRA_EMAIL": {
+              "Ref": "jiraEmail"
             }
           }
         },

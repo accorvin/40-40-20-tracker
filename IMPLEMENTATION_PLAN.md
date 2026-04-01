@@ -583,7 +583,7 @@ All API calls target the Jira Datacenter REST API at `https://issues.redhat.com`
 | `/rest/agile/1.0/board?projectKeyOrId=RHOAIENG&type=scrum` | GET | List scrum boards |
 | `/rest/agile/1.0/board/{boardId}/sprint` | GET | List sprints for a board |
 | `/rest/agile/1.0/sprint/{sprintId}/issue` | GET | Get issues in a sprint |
-| `/rest/api/2/search?jql={jql}` | GET | Execute JQL for feature work detection |
+| `/rest/api/3/search/jql?jql={jql}` | GET | Execute JQL for feature work detection |
 
 ### Authentication
 

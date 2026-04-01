@@ -30,7 +30,7 @@ app.use(function(req, res, next) {
   next();
 });
 
-const JIRA_HOST = process.env.JIRA_HOST || 'https://issues.redhat.com';
+const JIRA_HOST = process.env.JIRA_HOST || 'https://redhat.atlassian.net';
 const PORT = process.env.API_PORT || 3001;
 
 // ─── Auth middleware (skip Firebase verification in local dev) ───
@@ -61,17 +61,37 @@ function getJiraToken() {
   return token;
 }
 
-async function jiraRequest(path) {
+function getJiraEmail() {
+  const email = process.env.JIRA_EMAIL;
+  if (!email) {
+    throw new Error(
+      'JIRA_EMAIL environment variable is not set.\n' +
+      'Set it in a .env file or pass it directly:\n' +
+      '  JIRA_EMAIL=your-email@redhat.com node server/dev-server.js'
+    );
+  }
+  return email;
+}
+
+async function jiraRequest(path, { method = 'GET', body = null } = {}) {
   const token = getJiraToken();
+  const email = getJiraEmail();
   const MAX_RETRIES = 3;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    const response = await fetch(`${JIRA_HOST}${path}`, {
+    const fetchOptions = {
+      method,
       headers: {
-        'Authorization': `Bearer ${token}`,
+        'Authorization': `Basic ${Buffer.from(email + ':' + token).toString('base64')}`,
         'Accept': 'application/json'
       }
-    });
+    };
+    if (body) {
+      fetchOptions.headers['Content-Type'] = 'application/json';
+      fetchOptions.body = JSON.stringify(body);
+    }
+
+    const response = await fetch(`${JIRA_HOST}${path}`, fetchOptions);
 
     if (response.status === 429 && attempt < MAX_RETRIES) {
       const retryAfter = parseInt(response.headers.get('retry-after'), 10);

@@ -40,8 +40,8 @@ const lambdaClient = new LambdaClient({ region: process.env.AWS_REGION || 'us-ea
 const sqsClient = new SQSClient({ region: process.env.AWS_REGION || 'us-east-1' });
 
 const S3_BUCKET = process.env.S3_BUCKET;
-const JIRA_HOST = process.env.JIRA_HOST || 'https://issues.redhat.com';
-const JIRA_TOKEN_PARAMETER_NAME = process.env.JIRA_TOKEN_PARAMETER_NAME || '/40-40-20-tracker/dev/jira-token';
+const JIRA_HOST = process.env.JIRA_HOST || 'https://redhat.atlassian.net';
+const JIRA_TOKEN_PARAMETER_NAME = process.env.JIRA_TOKEN_PARAMETER_NAME || '/jira-tracker-app/dev/jira-token';
 const BOARD_REFRESH_QUEUE_URL = process.env.BOARD_REFRESH_QUEUE_URL;
 
 // Cache Jira token in memory
@@ -80,22 +80,33 @@ async function getJiraToken() {
 /**
  * Make authenticated request to Jira API
  */
-async function jiraRequest(path) {
+async function jiraRequest(path, { method = 'GET', body = null } = {}) {
   const token = await getJiraToken();
+  const email = process.env.JIRA_EMAIL;
+  if (!email) {
+    throw new Error('JIRA_EMAIL environment variable is not set');
+  }
   const url = `${JIRA_HOST}${path}`;
   // Reduced from 3 to 1: SQS handles retry backoff via visibility timeout
   const MAX_RETRIES = 1;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    console.log(`[Jira API] GET ${url}`);
+    console.log(`[Jira API] ${method} ${url}`);
     const startTime = Date.now();
 
-    const response = await fetch(url, {
+    const fetchOptions = {
+      method,
       headers: {
-        'Authorization': `Bearer ${token}`,
+        'Authorization': `Basic ${Buffer.from(email + ':' + token).toString('base64')}`,
         'Accept': 'application/json'
       }
-    });
+    };
+    if (body) {
+      fetchOptions.headers['Content-Type'] = 'application/json';
+      fetchOptions.body = JSON.stringify(body);
+    }
+
+    const response = await fetch(url, fetchOptions);
 
     const elapsed = Date.now() - startTime;
 

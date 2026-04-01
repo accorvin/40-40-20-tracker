@@ -37,7 +37,7 @@ npm run dev
 
 Examples:
 ```bash
-rh-aws-saml-login iaps-rhods-odh-dev/585132637328-rhoai-dev -- aws ssm get-parameter --name /40-40-20-tracker/dev/jira-token
+rh-aws-saml-login iaps-rhods-odh-dev/585132637328-rhoai-dev -- aws ssm get-parameter --name /jira-tracker-app/dev/jira-token
 rh-aws-saml-login iaps-rhods-odh-dev/585132637328-rhoai-dev -- amplify push
 rh-aws-saml-login iaps-rhods-odh-dev/585132637328-rhoai-dev -- amplify publish
 ```
@@ -80,10 +80,10 @@ rh-aws-saml-login iaps-rhods-odh-dev/585132637328-rhoai-dev -- amplify publish
 - **Learning (20%):** Excluded for now (shown as 0%)
 
 ### Jira Configuration
-- Host: `https://issues.redhat.com`
+- Host: `https://redhat.atlassian.net`
 - Project: RHOAIENG (boards), RHAISTRAT (features for parent hierarchy)
-- Token: `.env` for local dev, AWS SSM Parameter Store for production
-- Issue URL pattern: `https://issues.redhat.com/browse/{KEY}`
+- Token: `.env` for local dev, AWS SSM Parameter Store (`/jira-tracker-app/dev/jira-token`) for production
+- Issue URL pattern: `https://redhat.atlassian.net/browse/{KEY}`
 
 ### Views
 - **Dashboard:** Grid of all team summary cards showing current sprint allocation

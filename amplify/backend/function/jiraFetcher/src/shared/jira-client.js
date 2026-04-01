@@ -8,6 +8,20 @@
  * Returns { fetchBoards, fetchSprints, fetchSprintIssues }.
  */
 
+const FIELD_IDS = {
+  storyPoints: 'customfield_10028',
+  activityType: 'customfield_10464',
+};
+
+// NOTE: Jira Cloud v3 API returns rich text fields (e.g. description) in
+// Atlassian Document Format (ADF). We only use summary (plain text).
+// If adding description or other rich text fields, parse ADF accordingly.
+const ISSUE_FIELDS = [
+  'summary', 'issuetype', 'status', 'assignee',
+  FIELD_IDS.storyPoints, FIELD_IDS.activityType,
+  'resolution', 'resolutiondate'
+];
+
 function createJiraClient({ jiraRequest, jiraHost }) {
   /**
    * Fetch all scrum boards for a project (paginated)
@@ -79,13 +93,13 @@ function createJiraClient({ jiraRequest, jiraHost }) {
 
     while (startAt < total) {
       const data = await jiraRequest(
-        `/rest/agile/1.0/sprint/${sprintId}/issue?startAt=${startAt}&maxResults=${maxResults}&fields=summary,issuetype,status,assignee,customfield_12310243,customfield_12320040,resolution,resolutiondate`
+        `/rest/agile/1.0/sprint/${sprintId}/issue?startAt=${startAt}&maxResults=${maxResults}&fields=summary,issuetype,status,assignee,${FIELD_IDS.storyPoints},${FIELD_IDS.activityType},resolution,resolutiondate`
       );
 
       total = data.total;
 
       issues.push(...data.issues.map(issue => {
-        const storyPoints = issue.fields.customfield_12310243 ?? null;
+        const storyPoints = issue.fields[FIELD_IDS.storyPoints] ?? null;
 
         return {
           key: issue.key,
@@ -94,7 +108,7 @@ function createJiraClient({ jiraRequest, jiraHost }) {
           status: issue.fields.status?.name || null,
           assignee: issue.fields.assignee?.displayName || null,
           storyPoints: storyPoints,
-          activityType: issue.fields.customfield_12320040?.value || null,
+          activityType: issue.fields[FIELD_IDS.activityType]?.value || null,
           resolution: issue.fields.resolution?.name || null,
           resolutionDate: issue.fields.resolutiondate || null,
           url: `${jiraHost}/browse/${issue.key}`
@@ -119,30 +133,30 @@ function createJiraClient({ jiraRequest, jiraHost }) {
    * Fetch the JQL string from a saved filter
    */
   async function fetchFilterJql(filterId) {
-    const data = await jiraRequest(`/rest/api/2/filter/${filterId}`);
+    const data = await jiraRequest(`/rest/api/3/filter/${filterId}`);
     return data.jql;
   }
 
   /**
-   * Fetch issues by JQL query (paginated)
+   * Fetch issues by JQL query (cursor-based pagination via POST)
    */
   async function fetchIssuesByJql(jql) {
     const issues = [];
-    let startAt = 0;
     const maxResults = 100;
-    let total = Infinity;
-    const fields = 'summary,issuetype,status,assignee,customfield_12310243,customfield_12320040,resolution,resolutiondate';
+    let nextPageToken = undefined;
+    let isLast = false;
 
-    while (startAt < total) {
-      const data = await jiraRequest(
-        `/rest/api/2/search?jql=${encodeURIComponent(jql)}&fields=${fields}&maxResults=${maxResults}&startAt=${startAt}`
-      );
+    while (!isLast) {
+      const requestBody = { jql, fields: ISSUE_FIELDS, maxResults };
+      if (nextPageToken) requestBody.nextPageToken = nextPageToken;
 
-      total = data.total;
+      const data = await jiraRequest('/rest/api/3/search/jql', {
+        method: 'POST',
+        body: requestBody
+      });
 
       issues.push(...data.issues.map(issue => {
-        const storyPoints = issue.fields.customfield_12310243 ?? null;
-
+        const storyPoints = issue.fields[FIELD_IDS.storyPoints] ?? null;
         return {
           key: issue.key,
           summary: issue.fields.summary,
@@ -150,14 +164,16 @@ function createJiraClient({ jiraRequest, jiraHost }) {
           status: issue.fields.status?.name || null,
           assignee: issue.fields.assignee?.displayName || null,
           storyPoints: storyPoints,
-          activityType: issue.fields.customfield_12320040?.value || null,
+          activityType: issue.fields[FIELD_IDS.activityType]?.value || null,
           resolution: issue.fields.resolution?.name || null,
           resolutionDate: issue.fields.resolutiondate || null,
           url: `${jiraHost}/browse/${issue.key}`
         };
       }));
 
-      startAt += maxResults;
+      // Stop when isLast is explicitly true OR there's no next page token
+      isLast = data.isLast === true || !data.nextPageToken;
+      nextPageToken = data.nextPageToken;
     }
 
     return issues;
