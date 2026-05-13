@@ -1,4 +1,0 @@
-{
-  "CloudWatchRule": "cron(50 * * * ? *)",
-  "s3Bucket": "acorvin-40-40-20-tracker"
-}
